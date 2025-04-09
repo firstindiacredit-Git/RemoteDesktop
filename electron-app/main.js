@@ -46,27 +46,38 @@ function createWindow() {
         clearInterval(screenShareInterval);
       }
       
-      // Function to capture and send screen with improved quality
+      // Keep track of the last image to calculate difference
+      let lastImageData = null;
+      
+      // Function to capture and send screen with optimized bit rate
       const sendScreen = async () => {
         try {
-          // Increase the thumbnail size for better resolution
+          // Maintain high resolution
           const sources = await desktopCapturer.getSources({ 
             types: ['screen'],
             thumbnailSize: { 
-              width: 1920,  // Increased from 800
-              height: 1080  // Increased from 600
+              width: 1920,
+              height: 1080
             }
           });
           
           if (sources.length > 0) {
-            // Convert to base64 string to send via socket.io
-            const imageDataUrl = sources[0].thumbnail.toDataURL('image/jpeg', 0.8); // Set quality to 80%
-            socket.emit("screen-data", { 
-              to: data.from,
-              imageData: imageDataUrl,
-              screenWidth: 1920,
-              screenHeight: 1080
-            });
+            // Reduce quality to lower bit rate but keep resolution
+            // The third parameter is quality (0.0-1.0) - lower means less bandwidth
+            const imageDataUrl = sources[0].thumbnail.toDataURL('image/jpeg', 0.5);  // Reduced from 0.8 to 0.5
+            
+            // Only send if there's a significant change or it's been a while
+            // This avoids sending redundant frames when screen is static
+            if (!lastImageData || lastImageData !== imageDataUrl) {
+              socket.emit("screen-data", { 
+                to: data.from,
+                imageData: imageDataUrl,
+                screenWidth: 1920,
+                screenHeight: 1080
+              });
+              
+              lastImageData = imageDataUrl;
+            }
           }
         } catch (err) {
           console.error("Error capturing screen:", err);
@@ -76,9 +87,9 @@ function createWindow() {
       // Send initial screen capture
       await sendScreen();
       
-      // Then send updates at a rate that balances quality and performance
-      // Adjust interval to balance smoothness vs network load (200-500ms is reasonable)
-      screenShareInterval = setInterval(sendScreen, 250);
+      // Reduce update frequency to save bandwidth
+      // Increase interval from 250ms to 400ms (2.5 updates per second instead of 4)
+      screenShareInterval = setInterval(sendScreen, 400);
     } catch (err) {
       console.error("Error setting up screen sharing:", err);
       win.webContents.send('status-update', 'Screen sharing error: ' + err.message);
