@@ -30,8 +30,28 @@ function App() {
       
       const img = new Image();
       img.onload = () => {
-        const ctx = canvasRef.current.getContext('2d');
-        ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        // Get canvas context
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        
+        // Adjust canvas size if needed to match the incoming resolution
+        if (data.screenWidth && data.screenHeight) {
+          // Only resize if dimensions actually changed
+          if (canvas.width !== data.screenWidth || canvas.height !== data.screenHeight) {
+            // Set the canvas to the size of the incoming screen
+            canvas.width = data.screenWidth;
+            canvas.height = data.screenHeight;
+            
+            // Apply CSS to make it fit the container while maintaining aspect ratio
+            canvas.style.width = '100%';
+            canvas.style.height = 'auto';
+            canvas.style.maxHeight = '80vh'; // Prevent it from being too large
+          }
+        }
+        
+        // Clear canvas and draw new image
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       };
       img.src = data.imageData;
     });
@@ -214,17 +234,17 @@ function App() {
       )}
 
       {connected && (
-        <div>
+        <div style={{ width: '100%', maxWidth: '1920px', margin: '0 auto' }}>
           <canvas
             ref={canvasRef}
-            width="800"
-            height="600"
             onMouseMove={handleMouseMove}
             onMouseDown={handleMouseClick}
             onContextMenu={handleContextMenu}
             onWheel={handleMouseWheel}
             style={{ 
-              border: '1px solid #ccc'
+              border: '1px solid #ccc',
+              width: '100%',
+              height: 'auto'
             }}
           />
           

@@ -46,20 +46,26 @@ function createWindow() {
         clearInterval(screenShareInterval);
       }
       
-      // Function to capture and send screen
+      // Function to capture and send screen with improved quality
       const sendScreen = async () => {
         try {
+          // Increase the thumbnail size for better resolution
           const sources = await desktopCapturer.getSources({ 
             types: ['screen'],
-            thumbnailSize: { width: 800, height: 600 }
+            thumbnailSize: { 
+              width: 1920,  // Increased from 800
+              height: 1080  // Increased from 600
+            }
           });
           
           if (sources.length > 0) {
             // Convert to base64 string to send via socket.io
-            const imageDataUrl = sources[0].thumbnail.toDataURL();
+            const imageDataUrl = sources[0].thumbnail.toDataURL('image/jpeg', 0.8); // Set quality to 80%
             socket.emit("screen-data", { 
               to: data.from,
-              imageData: imageDataUrl
+              imageData: imageDataUrl,
+              screenWidth: 1920,
+              screenHeight: 1080
             });
           }
         } catch (err) {
@@ -70,8 +76,9 @@ function createWindow() {
       // Send initial screen capture
       await sendScreen();
       
-      // Then send updates every 200ms
-      screenShareInterval = setInterval(sendScreen, 200);
+      // Then send updates at a rate that balances quality and performance
+      // Adjust interval to balance smoothness vs network load (200-500ms is reasonable)
+      screenShareInterval = setInterval(sendScreen, 250);
     } catch (err) {
       console.error("Error setting up screen sharing:", err);
       win.webContents.send('status-update', 'Screen sharing error: ' + err.message);
