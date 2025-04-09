@@ -7,64 +7,53 @@ const socket = io("http://192.168.29.140:5000");
 
 function App() {
   const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const [hostId, setHostId] = useState("");
   const [availableHosts, setAvailableHosts] = useState([]);
-  const [peerConnection, setPeerConnection] = useState(null);
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     socket.on("host-available", (id) => {
       setAvailableHosts(prev => [...prev, id]);
     });
 
-    socket.on("answer", async (data) => {
-      await peerConnection.setRemoteDescription(data.answer);
-    });
-
-    socket.on("ice-candidate", async (data) => {
-      if (data.candidate) {
-        await peerConnection.addIceCandidate(data.candidate);
-      }
+    // Add handler for screen data
+    socket.on("screen-data", (data) => {
+      if (!canvasRef.current) return;
+      
+      const img = new Image();
+      img.onload = () => {
+        const ctx = canvasRef.current.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
+      };
+      img.src = data.imageData;
     });
 
     return () => {
       socket.off("host-available");
-      socket.off("answer");
-      socket.off("ice-candidate");
+      socket.off("screen-data");
     };
-  }, [peerConnection]);
+  }, []);
 
-  const connectToHost = async (hostId) => {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  const connectToHost = (id) => {
+    setHostId(id);
+    setConnected(true);
+    
+    // Tell the host we want to connect
+    socket.emit("connect-to-host", id);
+    
+    // Request screen data
+    socket.emit("request-screen", {
+      to: id,
+      from: socket.id
     });
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit("ice-candidate", {
-          to: hostId,
-          candidate: event.candidate
-        });
-      }
-    };
-
-    pc.ontrack = (event) => {
-      videoRef.current.srcObject = event.streams[0];
-    };
-
-    // Create and send offer
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    socket.emit("offer", {
-      to: hostId,
-      offer: offer
-    });
-
-    setPeerConnection(pc);
   };
 
   // Mouse/keyboard event handlers
   const handleMouseMove = (e) => {
-    const rect = videoRef.current.getBoundingClientRect();
+    if (!hostId) return;
+    
+    const rect = canvasRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
     
@@ -76,10 +65,34 @@ function App() {
   };
 
   const handleKeyPress = (e) => {
+    if (!hostId) return;
+    
     socket.emit("remote-key-press", {
       to: hostId,
       key: e.key
     });
+  };
+
+  const handleMouseClick = (e) => {
+    e.preventDefault(); // Prevent default browser behavior
+    if (!hostId) return;
+    
+    console.log("Mouse clicked:", e.button); // Debugging
+    
+    let button = "left";
+    if (e.button === 1) button = "middle";
+    if (e.button === 2) button = "right";
+    
+    socket.emit("remote-mouse-click", {
+      to: hostId,
+      button: button
+    });
+  };
+
+  // Prevent context menu on right-click
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    return false;
   };
 
   return (
@@ -90,28 +103,26 @@ function App() {
         <div>
           <h3>Available Hosts:</h3>
           {availableHosts.map(id => (
-            <button key={id} onClick={() => setHostId(id)}>
+            <button key={id} onClick={() => connectToHost(id)}>
               Connect to {id}
             </button>
           ))}
         </div>
       )}
 
-      {hostId && !peerConnection && (
-        <button onClick={() => connectToHost(hostId)}>
-          Start Controlling {hostId}
-        </button>
+      {connected && (
+        <canvas
+          ref={canvasRef}
+          width="800"
+          height="600"
+          onMouseMove={handleMouseMove}
+          onMouseDown={handleMouseClick}
+          onContextMenu={handleContextMenu}
+          onKeyDown={handleKeyPress}
+          tabIndex={0}
+          style={{ border: '1px solid #ccc' }}
+        />
       )}
-
-      <video
-        ref={videoRef}
-        autoPlay
-        width="800"
-        height="500"
-        onMouseMove={handleMouseMove}
-        onKeyDown={handleKeyPress}
-        tabIndex={0}
-      />
     </div>
   );
 }

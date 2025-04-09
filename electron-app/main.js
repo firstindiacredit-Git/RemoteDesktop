@@ -1,6 +1,6 @@
 // electron-app/robotjsControl.js
 
-const { BrowserWindow, desktopCapturer } = require("electron");
+const { app, BrowserWindow, desktopCapturer } = require("electron");
 const robot = require("robotjs");
 const io = require("socket.io-client");
 const path = require("path");
@@ -135,5 +135,21 @@ function createWindow() {
     socket.disconnect();
   });
 }
+
+// Initialize the app when Electron is ready
+app.whenReady().then(createWindow);
+
+// Quit when all windows are closed
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
 
 module.exports = { createWindow };
