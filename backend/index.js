@@ -60,6 +60,26 @@ io.on("connection", (socket) => {
   socket.on("remote-key-press", (data) => {
     socket.to(data.to).emit("remote-key-press", data);
   });
+
+  socket.on("connect-to-host", (hostId) => {
+    console.log(`Client ${socket.id} wants to connect to host ${hostId}`);
+    socket.to(hostId).emit("controller-connected", socket.id);
+  });
+
+  socket.on("request-screen", (data) => {
+    console.log(`Screen requested from ${data.from} to ${data.to}`);
+    socket.to(data.to).emit("request-screen", data);
+  });
+
+  socket.on("screen-data", (data) => {
+    // Forward screen data to the controller
+    socket.to(data.to).emit("screen-data", data);
+  });
+
+  socket.on("disconnect", () => {
+    console.log(`Socket ${socket.id} disconnected`);
+    socket.broadcast.emit("controller-disconnected", socket.id);
+  });
 });
 
 
