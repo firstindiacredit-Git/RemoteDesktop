@@ -100,10 +100,20 @@ function createWindow() {
   // Handle key press
   socket.on("remote-key-press", (data) => {
     try {
-      const { key } = data;
-      robot.keyTap(key);
+      const { key, modifier } = data;
+      
+      if (modifier && modifier.length > 0) {
+        // Handle key combinations with modifiers
+        robot.keyTap(key, modifier);
+        console.log(`Key ${key} pressed with modifiers: ${modifier.join(', ')}`);
+      } else {
+        // Handle single key press
+        robot.keyTap(key);
+        console.log(`Key ${key} pressed`);
+      }
     } catch (err) {
       console.error("Error handling key press:", err);
+      console.error("Key data:", data);
     }
   });
 

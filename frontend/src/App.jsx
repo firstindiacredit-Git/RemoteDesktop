@@ -35,6 +35,13 @@ function App() {
     };
   }, []);
 
+  // Set focus on canvas when connection is established
+  useEffect(() => {
+    if (connected && canvasRef.current) {
+      canvasRef.current.focus();
+    }
+  }, [connected]);
+
   const connectToHost = (id) => {
     setHostId(id);
     setConnected(true);
@@ -47,6 +54,39 @@ function App() {
       to: id,
       from: socket.id
     });
+
+    // We need to add a global event listener for keys
+    window.addEventListener('keydown', handleKeyDown);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  };
+
+  // Map special keys to robotjs format
+  const mapKeyToRobotJs = (key) => {
+    const specialKeyMap = {
+      'ArrowUp': 'up',
+      'ArrowDown': 'down',
+      'ArrowLeft': 'left',
+      'ArrowRight': 'right',
+      'Backspace': 'backspace',
+      'Tab': 'tab',
+      'Enter': 'enter',
+      'Escape': 'escape',
+      'Delete': 'delete',
+      'Home': 'home',
+      'End': 'end',
+      'PageUp': 'pageup',
+      'PageDown': 'pagedown',
+      'Control': 'control',
+      'Alt': 'alt',
+      'Shift': 'shift',
+      'Meta': 'command', // Windows key or Mac command key
+      ' ': 'space'
+    };
+
+    return specialKeyMap[key] || key.toLowerCase();
   };
 
   // Mouse/keyboard event handlers
@@ -64,13 +104,37 @@ function App() {
     });
   };
 
-  const handleKeyPress = (e) => {
+  // Global key handler
+  const handleKeyDown = (e) => {
     if (!hostId) return;
     
-    socket.emit("remote-key-press", {
-      to: hostId,
-      key: e.key
-    });
+    // Prevent default browser behavior except for combinations with Ctrl/Meta for browser shortcuts
+    if (!(e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+    }
+    
+    const robotKey = mapKeyToRobotJs(e.key);
+    console.log("Key pressed:", e.key, "→ RobotJS key:", robotKey);
+    
+    // Special handling for modifier combinations
+    if (e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) {
+      const modifiers = [];
+      if (e.ctrlKey) modifiers.push("control");
+      if (e.altKey) modifiers.push("alt");
+      if (e.shiftKey) modifiers.push("shift");
+      if (e.metaKey) modifiers.push("command");
+      
+      socket.emit("remote-key-press", {
+        to: hostId,
+        key: robotKey,
+        modifier: modifiers
+      });
+    } else {
+      socket.emit("remote-key-press", {
+        to: hostId,
+        key: robotKey
+      });
+    }
   };
 
   const handleMouseClick = (e) => {
@@ -111,17 +175,24 @@ function App() {
       )}
 
       {connected && (
-        <canvas
-          ref={canvasRef}
-          width="800"
-          height="600"
-          onMouseMove={handleMouseMove}
-          onMouseDown={handleMouseClick}
-          onContextMenu={handleContextMenu}
-          onKeyDown={handleKeyPress}
-          tabIndex={0}
-          style={{ border: '1px solid #ccc' }}
-        />
+        <div style={{ outline: 'none' }} tabIndex={-1}>
+          <canvas
+            ref={canvasRef}
+            width="800"
+            height="600"
+            onMouseMove={handleMouseMove}
+            onMouseDown={handleMouseClick}
+            onContextMenu={handleContextMenu}
+            tabIndex={0}
+            style={{ 
+              border: '1px solid #ccc',
+              outline: 'none'  // Remove focus outline
+            }}
+          />
+          <div style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
+            Click on the canvas to focus and enable keyboard control
+          </div>
+        </div>
       )}
     </div>
   );
