@@ -126,6 +126,21 @@ function createWindow() {
         'CapsLock': 'caps_lock'
       };
       
+      // Explicitly define the toggle state as a string value
+      const toggleState = (type === 'down') ? 'down' : 'up';
+      
+      // Special handling for CapsLock
+      if (key === 'CapsLock') {
+        // Instead of trying to toggle CapsLock (which can be problematic),
+        // let's use a key tap approach
+        if (type === 'down') {
+          robot.keyTap('caps_lock');
+          console.log("Tapped caps_lock key");
+        }
+        win.webContents.send('status-update', `CapsLock tap`);
+        return;
+      }
+      
       // Get robotjs key
       let robotKey = keyMap[key] || key.toLowerCase();
       
@@ -135,16 +150,6 @@ function createWindow() {
       if (modifiers.control) activeModifiers.push('control');
       if (modifiers.alt) activeModifiers.push('alt');
       if (modifiers.meta) activeModifiers.push('command');
-      
-      // Use the correct string value for the toggle state
-      const toggleState = type === 'down' ? 'down' : 'up';
-      
-      // Special handling for CapsLock
-      if (key === 'CapsLock') {
-        robot.keyToggle('caps_lock', toggleState);
-        win.webContents.send('status-update', `CapsLock ${toggleState}`);
-        return;
-      }
       
       // For modifier keys themselves
       if (key === 'Shift' || key === 'Control' || key === 'Alt' || key === 'Meta') {
@@ -156,7 +161,11 @@ function createWindow() {
       } 
       // For regular keys
       else {
-        robot.keyToggle(robotKey, toggleState);
+        if (type === 'down') {
+          robot.keyToggle(robotKey, 'down');
+        } else {
+          robot.keyToggle(robotKey, 'up');
+        }
       }
       
       win.webContents.send('status-update', `Key ${type}: ${key}`);
