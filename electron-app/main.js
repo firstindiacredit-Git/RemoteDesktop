@@ -111,7 +111,7 @@ function createWindow() {
         'ArrowRight': 'right',
         'Backspace': 'backspace',
         'Delete': 'delete',
-        'Enter': 'return',
+        'Enter': 'enter',
         'Tab': 'tab',
         'Escape': 'escape',
         'Home': 'home',
@@ -221,3 +221,5 @@ app.on('activate', () => {
 });
 
 module.exports = { createWindow };
+
+
