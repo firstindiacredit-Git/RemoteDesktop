@@ -129,42 +129,34 @@ function createWindow() {
       // Get robotjs key
       let robotKey = keyMap[key] || key.toLowerCase();
       
-      // Handle special cases
-      if (key === 'CapsLock') {
-        robot.keyToggle('caps_lock', type);
-        win.webContents.send('status-update', `CapsLock ${type}`);
-        return;
-      }
-      
-      // Build modifier array - only for special key combinations
+      // Build modifier array
       const activeModifiers = [];
       if (modifiers.shift) activeModifiers.push('shift');
       if (modifiers.control) activeModifiers.push('control');
       if (modifiers.alt) activeModifiers.push('alt');
       if (modifiers.meta) activeModifiers.push('command');
       
-      // For key down events
-      if (type === 'down') {
-        // For modifier keys themselves
-        if (key === 'Shift' || key === 'Control' || key === 'Alt' || key === 'Meta') {
-          robot.keyToggle(robotKey, 'down');
-        } 
-        // For regular keys with modifiers
-        else if (activeModifiers.length > 0) {
-          robot.keyTap(robotKey, activeModifiers);
-        } 
-        // For regular keys
-        else {
-          robot.keyToggle(robotKey, 'down');
-        }
+      // Use the correct string value for the toggle state
+      const toggleState = type === 'down' ? 'down' : 'up';
+      
+      // Special handling for CapsLock
+      if (key === 'CapsLock') {
+        robot.keyToggle('caps_lock', toggleState);
+        win.webContents.send('status-update', `CapsLock ${toggleState}`);
+        return;
       }
-      // For key up events
-      else if (type === 'up') {
-        // Only toggle up for non-modifier keys or the modifier keys themselves
-        if (key === 'Shift' || key === 'Control' || key === 'Alt' || key === 'Meta' || 
-            (!modifiers.shift && !modifiers.control && !modifiers.alt && !modifiers.meta)) {
-          robot.keyToggle(robotKey, 'up');
-        }
+      
+      // For modifier keys themselves
+      if (key === 'Shift' || key === 'Control' || key === 'Alt' || key === 'Meta') {
+        robot.keyToggle(robotKey, toggleState);
+      } 
+      // For regular keys with modifiers
+      else if (activeModifiers.length > 0 && type === 'down') {
+        robot.keyTap(robotKey, activeModifiers);
+      } 
+      // For regular keys
+      else {
+        robot.keyToggle(robotKey, toggleState);
       }
       
       win.webContents.send('status-update', `Key ${type}: ${key}`);
