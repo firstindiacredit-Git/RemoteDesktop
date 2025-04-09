@@ -6,11 +6,11 @@ import io from "socket.io-client";
 const socket = io("http://192.168.29.140:5000");
 
 function App() {
-  const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [hostId, setHostId] = useState("");
   const [availableHosts, setAvailableHosts] = useState([]);
   const [connected, setConnected] = useState(false);
+  const [keyboardActive, setKeyboardActive] = useState(false);
 
   useEffect(() => {
     socket.on("host-available", (id) => {
@@ -29,18 +29,31 @@ function App() {
       img.src = data.imageData;
     });
 
+    // Global key handler - SIMPLIFIED
+    const handleKeyPress = (e) => {
+      if (!hostId) return;
+      
+      // Prevent defaults to avoid browser actions
+      e.preventDefault();
+      
+      console.log("Key pressed:", e.key);
+      
+      // Send the exact key string to the server
+      socket.emit("remote-key-press", {
+        to: hostId,
+        key: e.key
+      });
+    };
+    
+    // Add global keyboard listeners
+    document.addEventListener('keydown', handleKeyPress);
+    
     return () => {
       socket.off("host-available");
       socket.off("screen-data");
+      document.removeEventListener('keydown', handleKeyPress);
     };
-  }, []);
-
-  // Set focus on canvas when connection is established
-  useEffect(() => {
-    if (connected && canvasRef.current) {
-      canvasRef.current.focus();
-    }
-  }, [connected]);
+  }, [hostId]); // Include hostId in dependencies
 
   const connectToHost = (id) => {
     setHostId(id);
@@ -54,42 +67,12 @@ function App() {
       to: id,
       from: socket.id
     });
-
-    // We need to add a global event listener for keys
-    window.addEventListener('keydown', handleKeyDown);
     
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
+    // Activate keyboard
+    setKeyboardActive(true);
   };
 
-  // Map special keys to robotjs format
-  const mapKeyToRobotJs = (key) => {
-    const specialKeyMap = {
-      'ArrowUp': 'up',
-      'ArrowDown': 'down',
-      'ArrowLeft': 'left',
-      'ArrowRight': 'right',
-      'Backspace': 'backspace',
-      'Tab': 'tab',
-      'Enter': 'enter',
-      'Escape': 'escape',
-      'Delete': 'delete',
-      'Home': 'home',
-      'End': 'end',
-      'PageUp': 'pageup',
-      'PageDown': 'pagedown',
-      'Control': 'control',
-      'Alt': 'alt',
-      'Shift': 'shift',
-      'Meta': 'command', // Windows key or Mac command key
-      ' ': 'space'
-    };
-
-    return specialKeyMap[key] || key.toLowerCase();
-  };
-
-  // Mouse/keyboard event handlers
+  // Mouse handlers
   const handleMouseMove = (e) => {
     if (!hostId) return;
     
@@ -102,39 +85,6 @@ function App() {
       x: Math.round(x * screen.width),
       y: Math.round(y * screen.height)
     });
-  };
-
-  // Global key handler
-  const handleKeyDown = (e) => {
-    if (!hostId) return;
-    
-    // Prevent default browser behavior except for combinations with Ctrl/Meta for browser shortcuts
-    if (!(e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-    }
-    
-    const robotKey = mapKeyToRobotJs(e.key);
-    console.log("Key pressed:", e.key, "→ RobotJS key:", robotKey);
-    
-    // Special handling for modifier combinations
-    if (e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) {
-      const modifiers = [];
-      if (e.ctrlKey) modifiers.push("control");
-      if (e.altKey) modifiers.push("alt");
-      if (e.shiftKey) modifiers.push("shift");
-      if (e.metaKey) modifiers.push("command");
-      
-      socket.emit("remote-key-press", {
-        to: hostId,
-        key: robotKey,
-        modifier: modifiers
-      });
-    } else {
-      socket.emit("remote-key-press", {
-        to: hostId,
-        key: robotKey
-      });
-    }
   };
 
   const handleMouseClick = (e) => {
@@ -175,7 +125,7 @@ function App() {
       )}
 
       {connected && (
-        <div style={{ outline: 'none' }} tabIndex={-1}>
+        <div>
           <canvas
             ref={canvasRef}
             width="800"
@@ -183,14 +133,17 @@ function App() {
             onMouseMove={handleMouseMove}
             onMouseDown={handleMouseClick}
             onContextMenu={handleContextMenu}
-            tabIndex={0}
             style={{ 
-              border: '1px solid #ccc',
-              outline: 'none'  // Remove focus outline
+              border: '1px solid #ccc'
             }}
           />
-          <div style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
-            Click on the canvas to focus and enable keyboard control
+          <div style={{ 
+            marginTop: '10px', 
+            padding: '8px', 
+            backgroundColor: keyboardActive ? '#e6ffe6' : '#ffe6e6',
+            borderRadius: '4px'
+          }}>
+            <strong>Keyboard status:</strong> {keyboardActive ? 'Active - Press any key' : 'Not active'}
           </div>
         </div>
       )}

@@ -100,20 +100,80 @@ function createWindow() {
   // Handle key press
   socket.on("remote-key-press", (data) => {
     try {
-      const { key, modifier } = data;
+      const { key } = data;
+      console.log("Received key press:", key);
       
-      if (modifier && modifier.length > 0) {
-        // Handle key combinations with modifiers
-        robot.keyTap(key, modifier);
-        console.log(`Key ${key} pressed with modifiers: ${modifier.join(', ')}`);
-      } else {
-        // Handle single key press
-        robot.keyTap(key);
-        console.log(`Key ${key} pressed`);
+      // Map keys from browser format to robotjs format
+      let robotKey = key;
+      let modifiers = [];
+      
+      // Special key mapping
+      const keyMap = {
+        'ArrowUp': 'up',
+        'ArrowDown': 'down',
+        'ArrowLeft': 'left',
+        'ArrowRight': 'right',
+        'Backspace': 'backspace',
+        'Delete': 'delete',
+        'Enter': 'enter',
+        'Tab': 'tab',
+        'Escape': 'escape',
+        'Home': 'home',
+        'End': 'end',
+        'PageUp': 'pageup',
+        'PageDown': 'pagedown',
+        ' ': 'space'
+      };
+      
+      // Handle modifier keys
+      if (key === 'Control' || key === 'Alt' || key === 'Shift' || key === 'Meta') {
+        // For modifier keys, we simulate pressing them with another key
+        if (key === 'Control') {
+          modifiers.push('control');
+          robotKey = 'a'; // Just a placeholder key, will be released immediately
+        } else if (key === 'Alt') {
+          modifiers.push('alt');
+          robotKey = 'a';
+        } else if (key === 'Shift') {
+          modifiers.push('shift');
+          robotKey = 'a';
+        } else if (key === 'Meta') { // Windows key
+          modifiers.push('command');
+          robotKey = 'a';
+        }
+      } 
+      // Handle complex key combinations like Ctrl+C
+      else if (key.length > 1 && key.includes('+')) {
+        const parts = key.split('+');
+        robotKey = parts[parts.length - 1].toLowerCase();
+        
+        if (key.includes('Control+')) modifiers.push('control');
+        if (key.includes('Alt+')) modifiers.push('alt');
+        if (key.includes('Shift+')) modifiers.push('shift');
+        if (key.includes('Meta+')) modifiers.push('command');
       }
+      // Handle special keys
+      else if (keyMap[key]) {
+        robotKey = keyMap[key];
+      } 
+      // Handle regular keys
+      else if (key.length === 1) {
+        robotKey = key.toLowerCase();
+      }
+      
+      console.log(`Sending to robotjs: key=${robotKey}, modifiers=${modifiers.join(',')}`);
+      
+      if (modifiers.length > 0) {
+        robot.keyTap(robotKey, modifiers);
+      } else {
+        robot.keyTap(robotKey);
+      }
+      
+      win.webContents.send('status-update', `Key pressed: ${key}`);
     } catch (err) {
       console.error("Error handling key press:", err);
       console.error("Key data:", data);
+      win.webContents.send('status-update', `Error with key: ${data.key} - ${err.message}`);
     }
   });
 
