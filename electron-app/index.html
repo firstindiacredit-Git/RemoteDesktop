@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Remote Desktop Host</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background-color: #f0f0f0;
+    }
+    h2 {
+      color: #333;
+    }
+    .status {
+      margin-top: 20px;
+      padding: 10px;
+      background-color: #e1f5fe;
+      border-radius: 4px;
+    }
+    #connectionId {
+      font-weight: bold;
+      color: #0277bd;
+    }
+  </style>
+</head>
+<body>
+  <h2>Remote Desktop Host</h2>
+  <div class="status">
+    Connection ID: <span id="connectionId">Connecting...</span>
+  </div>
+  <div id="status-message">Waiting for connection...</div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    
+    ipcRenderer.on('connection-id', (event, id) => {
+      document.getElementById('connectionId').textContent = id;
+    });
+    
+    ipcRenderer.on('status-update', (event, message) => {
+      document.getElementById('status-message').textContent = message;
+    });
+  </script>
+</body>
+</html>
