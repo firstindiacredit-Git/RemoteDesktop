@@ -146,13 +146,16 @@ function App() {
     if (!hostId) return;
     
     const rect = canvasRef.current.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
     
+    // Send absolute position and canvas dimensions
     socket.emit("remote-mouse-move", {
       to: hostId,
-      x: Math.round(x * screen.width),
-      y: Math.round(y * screen.height)
+      x: x,
+      y: y,
+      screenWidth: rect.width,
+      screenHeight: rect.height
     });
   };
 

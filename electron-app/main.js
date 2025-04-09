@@ -87,11 +87,22 @@ function createWindow() {
     win.webContents.send('status-update', 'Controller disconnected');
   });
 
-  // Handle mouse movement
+  // Handle mouse movement with improved positioning
   socket.on("remote-mouse-move", (data) => {
     try {
-      const { x, y } = data;
-      robot.moveMouse(x, y);
+      const { x, y, screenWidth, screenHeight } = data;
+      
+      // Get the local screen size
+      const { width: localWidth, height: localHeight } = robot.getScreenSize();
+      
+      // Convert the coordinates proportionally based on the remote screen size
+      const scaledX = Math.round((x / screenWidth) * localWidth);
+      const scaledY = Math.round((y / screenHeight) * localHeight);
+      
+      console.log(`Mouse move: Original(${x},${y}) => Scaled(${scaledX},${scaledY})`);
+      
+      // Move the mouse to the scaled position
+      robot.moveMouse(scaledX, scaledY);
     } catch (err) {
       console.error("Error handling mouse move:", err);
     }
