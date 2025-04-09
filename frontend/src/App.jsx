@@ -181,6 +181,26 @@ function App() {
     return false;
   };
 
+  const handleMouseWheel = (e) => {
+    if (!hostId) return;
+    
+    // Prevent default browser scrolling
+    e.preventDefault();
+    
+    // Get the scroll direction and amount
+    // deltaY > 0 means scroll down, deltaY < 0 means scroll up
+    const scrollY = e.deltaY;
+    const scrollX = e.deltaX; // For horizontal scrolling if needed
+    
+    console.log(`Scroll: X:${scrollX}, Y:${scrollY}`);
+    
+    socket.emit("remote-mouse-scroll", {
+      to: hostId,
+      scrollY: scrollY,
+      scrollX: scrollX
+    });
+  };
+
   return (
     <div>
       <h2>Remote Control - Controller</h2>
@@ -205,6 +225,7 @@ function App() {
             onMouseMove={handleMouseMove}
             onMouseDown={handleMouseClick}
             onContextMenu={handleContextMenu}
+            onWheel={handleMouseWheel}
             style={{ 
               border: '1px solid #ccc'
             }}

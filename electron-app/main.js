@@ -197,6 +197,40 @@ function createWindow() {
     }
   });
 
+  // Handle mouse scrolling
+  socket.on("remote-mouse-scroll", (data) => {
+    try {
+      const { scrollY, scrollX } = data;
+      
+      // robotjs uses scroll amount in "clicks" where positive is up, negative is down
+      // But browser wheel events are opposite: positive is down, negative is up
+      // So we need to invert the value and normalize it
+      
+      // Calculate scroll amount (normalize to "clicks" - usually 1-3)
+      // A single mousewheel movement is typically around 100-125 pixels in browsers
+      let amount = Math.abs(Math.round(scrollY / 100));
+      if (amount === 0) amount = 1; // Ensure at least 1 click
+      
+      // Determine direction (robotjs: "up" or "down")
+      const direction = scrollY < 0 ? "up" : "down";
+      
+      console.log(`Scrolling ${direction} by ${amount} clicks`);
+      
+      // Execute the scroll
+      robot.scrollMouse(amount, direction);
+      
+      // Handle horizontal scrolling if needed (uncomment if your app needs it)
+      // if (Math.abs(scrollX) > Math.abs(scrollY)) {
+      //   const horizAmount = Math.abs(Math.round(scrollX / 100));
+      //   const horizDir = scrollX < 0 ? "left" : "right";
+      //   robot.scrollMouse(horizAmount || 1, horizDir);
+      // }
+      
+    } catch (err) {
+      console.error("Error handling mouse scroll:", err);
+    }
+  });
+
   // Handle disconnection
   socket.on("disconnect", () => {
     if (screenShareInterval) {

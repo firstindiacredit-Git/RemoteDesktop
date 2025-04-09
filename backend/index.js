@@ -65,6 +65,10 @@ io.on("connection", (socket) => {
     socket.to(data.to).emit("remote-key-event", data);
   });
 
+  socket.on("remote-mouse-scroll", (data) => {
+    socket.to(data.to).emit("remote-mouse-scroll", data);
+  });
+
   socket.on("connect-to-host", (hostId) => {
     console.log(`Client ${socket.id} wants to connect to host ${hostId}`);
     socket.to(hostId).emit("controller-connected", socket.id);
