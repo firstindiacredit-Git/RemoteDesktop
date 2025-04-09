@@ -11,6 +11,13 @@ function App() {
   const [availableHosts, setAvailableHosts] = useState([]);
   const [connected, setConnected] = useState(false);
   const [keyboardActive, setKeyboardActive] = useState(false);
+  const [modifierKeys, setModifierKeys] = useState({
+    shift: false,
+    control: false,
+    alt: false,
+    meta: false,
+    capsLock: false
+  });
 
   useEffect(() => {
     socket.on("host-available", (id) => {
@@ -29,31 +36,93 @@ function App() {
       img.src = data.imageData;
     });
 
-    // Global key handler - SIMPLIFIED
-    const handleKeyPress = (e) => {
+    // Global key handlers
+    const handleKeyDown = (e) => {
       if (!hostId) return;
+      
+      // Track modifier key states
+      if (e.key === 'Shift') {
+        setModifierKeys(prev => ({...prev, shift: true}));
+      } else if (e.key === 'Control') {
+        setModifierKeys(prev => ({...prev, control: true}));
+      } else if (e.key === 'Alt') {
+        setModifierKeys(prev => ({...prev, alt: true}));
+      } else if (e.key === 'Meta') { // Windows key
+        setModifierKeys(prev => ({...prev, meta: true}));
+      } else if (e.key === 'CapsLock') {
+        setModifierKeys(prev => ({...prev, capsLock: !prev.capsLock}));
+      }
       
       // Prevent defaults to avoid browser actions
       e.preventDefault();
       
-      console.log("Key pressed:", e.key);
+      console.log("Key down:", e.key, "Modifiers:", 
+        `Shift:${e.shiftKey}, Ctrl:${e.ctrlKey}, Alt:${e.altKey}, Meta:${e.metaKey}, CapsLock:${e.getModifierState('CapsLock')}`);
       
-      // Send the exact key string to the server
-      socket.emit("remote-key-press", {
+      // Send key event with all necessary information
+      socket.emit("remote-key-event", {
         to: hostId,
-        key: e.key
+        type: "down",
+        key: e.key,
+        code: e.code,
+        keyCode: e.keyCode,
+        modifiers: {
+          shift: e.shiftKey,
+          control: e.ctrlKey,
+          alt: e.altKey,
+          meta: e.metaKey,
+          capsLock: e.getModifierState('CapsLock')
+        }
+      });
+    };
+    
+    const handleKeyUp = (e) => {
+      if (!hostId) return;
+      
+      // Track modifier key states
+      if (e.key === 'Shift') {
+        setModifierKeys(prev => ({...prev, shift: false}));
+      } else if (e.key === 'Control') {
+        setModifierKeys(prev => ({...prev, control: false}));
+      } else if (e.key === 'Alt') {
+        setModifierKeys(prev => ({...prev, alt: false}));
+      } else if (e.key === 'Meta') { // Windows key
+        setModifierKeys(prev => ({...prev, meta: false}));
+      }
+      
+      // Prevent defaults to avoid browser actions
+      e.preventDefault();
+      
+      console.log("Key up:", e.key);
+      
+      // Send key up event
+      socket.emit("remote-key-event", {
+        to: hostId,
+        type: "up",
+        key: e.key,
+        code: e.code,
+        keyCode: e.keyCode,
+        modifiers: {
+          shift: e.shiftKey,
+          control: e.ctrlKey,
+          alt: e.altKey,
+          meta: e.metaKey,
+          capsLock: e.getModifierState('CapsLock')
+        }
       });
     };
     
     // Add global keyboard listeners
-    document.addEventListener('keydown', handleKeyPress);
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
     
     return () => {
       socket.off("host-available");
       socket.off("screen-data");
-      document.removeEventListener('keydown', handleKeyPress);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
     };
-  }, [hostId]); // Include hostId in dependencies
+  }, [hostId, modifierKeys]); // Include hostId and modifierKeys in dependencies
 
   const connectToHost = (id) => {
     setHostId(id);
@@ -137,6 +206,7 @@ function App() {
               border: '1px solid #ccc'
             }}
           />
+          
           <div style={{ 
             marginTop: '10px', 
             padding: '8px', 
@@ -144,6 +214,39 @@ function App() {
             borderRadius: '4px'
           }}>
             <strong>Keyboard status:</strong> {keyboardActive ? 'Active - Press any key' : 'Not active'}
+            <div style={{marginTop: '5px'}}>
+              <span style={{
+                padding: '3px 6px',
+                margin: '0 3px',
+                backgroundColor: modifierKeys.shift ? '#007bff' : '#e6e6e6',
+                color: modifierKeys.shift ? 'white' : 'black',
+                borderRadius: '3px'
+              }}>Shift</span>
+              
+              <span style={{
+                padding: '3px 6px',
+                margin: '0 3px',
+                backgroundColor: modifierKeys.control ? '#007bff' : '#e6e6e6',
+                color: modifierKeys.control ? 'white' : 'black',
+                borderRadius: '3px'
+              }}>Ctrl</span>
+              
+              <span style={{
+                padding: '3px 6px',
+                margin: '0 3px',
+                backgroundColor: modifierKeys.alt ? '#007bff' : '#e6e6e6',
+                color: modifierKeys.alt ? 'white' : 'black',
+                borderRadius: '3px'
+              }}>Alt</span>
+              
+              <span style={{
+                padding: '3px 6px',
+                margin: '0 3px',
+                backgroundColor: modifierKeys.capsLock ? '#007bff' : '#e6e6e6',
+                color: modifierKeys.capsLock ? 'white' : 'black',
+                borderRadius: '3px'
+              }}>Caps</span>
+            </div>
           </div>
         </div>
       )}

@@ -97,17 +97,13 @@ function createWindow() {
     }
   });
 
-  // Handle key press
-  socket.on("remote-key-press", (data) => {
+  // Handle improved key events (down/up)
+  socket.on("remote-key-event", (data) => {
     try {
-      const { key } = data;
-      console.log("Received key press:", key);
+      const { type, key, modifiers } = data;
+      console.log(`Received key ${type}:`, key, "Modifiers:", JSON.stringify(modifiers));
       
       // Map keys from browser format to robotjs format
-      let robotKey = key;
-      let modifiers = [];
-      
-      // Special key mapping
       const keyMap = {
         'ArrowUp': 'up',
         'ArrowDown': 'down',
@@ -115,65 +111,67 @@ function createWindow() {
         'ArrowRight': 'right',
         'Backspace': 'backspace',
         'Delete': 'delete',
-        'Enter': 'enter',
+        'Enter': 'return',
         'Tab': 'tab',
         'Escape': 'escape',
         'Home': 'home',
         'End': 'end',
         'PageUp': 'pageup',
         'PageDown': 'pagedown',
-        ' ': 'space'
+        ' ': 'space',
+        'Control': 'control',
+        'Shift': 'shift',
+        'Alt': 'alt',
+        'Meta': 'command',
+        'CapsLock': 'caps_lock'
       };
       
-      // Handle modifier keys
-      if (key === 'Control' || key === 'Alt' || key === 'Shift' || key === 'Meta') {
-        // For modifier keys, we simulate pressing them with another key
-        if (key === 'Control') {
-          modifiers.push('control');
-          robotKey = 'a'; // Just a placeholder key, will be released immediately
-        } else if (key === 'Alt') {
-          modifiers.push('alt');
-          robotKey = 'a';
-        } else if (key === 'Shift') {
-          modifiers.push('shift');
-          robotKey = 'a';
-        } else if (key === 'Meta') { // Windows key
-          modifiers.push('command');
-          robotKey = 'a';
+      // Get robotjs key
+      let robotKey = keyMap[key] || key.toLowerCase();
+      
+      // Handle special cases
+      if (key === 'CapsLock') {
+        robot.keyToggle('caps_lock', type);
+        win.webContents.send('status-update', `CapsLock ${type}`);
+        return;
+      }
+      
+      // Build modifier array - only for special key combinations
+      const activeModifiers = [];
+      if (modifiers.shift) activeModifiers.push('shift');
+      if (modifiers.control) activeModifiers.push('control');
+      if (modifiers.alt) activeModifiers.push('alt');
+      if (modifiers.meta) activeModifiers.push('command');
+      
+      // For key down events
+      if (type === 'down') {
+        // For modifier keys themselves
+        if (key === 'Shift' || key === 'Control' || key === 'Alt' || key === 'Meta') {
+          robot.keyToggle(robotKey, 'down');
+        } 
+        // For regular keys with modifiers
+        else if (activeModifiers.length > 0) {
+          robot.keyTap(robotKey, activeModifiers);
+        } 
+        // For regular keys
+        else {
+          robot.keyToggle(robotKey, 'down');
         }
-      } 
-      // Handle complex key combinations like Ctrl+C
-      else if (key.length > 1 && key.includes('+')) {
-        const parts = key.split('+');
-        robotKey = parts[parts.length - 1].toLowerCase();
-        
-        if (key.includes('Control+')) modifiers.push('control');
-        if (key.includes('Alt+')) modifiers.push('alt');
-        if (key.includes('Shift+')) modifiers.push('shift');
-        if (key.includes('Meta+')) modifiers.push('command');
       }
-      // Handle special keys
-      else if (keyMap[key]) {
-        robotKey = keyMap[key];
-      } 
-      // Handle regular keys
-      else if (key.length === 1) {
-        robotKey = key.toLowerCase();
+      // For key up events
+      else if (type === 'up') {
+        // Only toggle up for non-modifier keys or the modifier keys themselves
+        if (key === 'Shift' || key === 'Control' || key === 'Alt' || key === 'Meta' || 
+            (!modifiers.shift && !modifiers.control && !modifiers.alt && !modifiers.meta)) {
+          robot.keyToggle(robotKey, 'up');
+        }
       }
       
-      console.log(`Sending to robotjs: key=${robotKey}, modifiers=${modifiers.join(',')}`);
-      
-      if (modifiers.length > 0) {
-        robot.keyTap(robotKey, modifiers);
-      } else {
-        robot.keyTap(robotKey);
-      }
-      
-      win.webContents.send('status-update', `Key pressed: ${key}`);
+      win.webContents.send('status-update', `Key ${type}: ${key}`);
     } catch (err) {
-      console.error("Error handling key press:", err);
+      console.error(`Error handling key ${type}:`, err);
       console.error("Key data:", data);
-      win.webContents.send('status-update', `Error with key: ${data.key} - ${err.message}`);
+      win.webContents.send('status-update', `Error with key ${type}: ${data.key} - ${err.message}`);
     }
   });
 
