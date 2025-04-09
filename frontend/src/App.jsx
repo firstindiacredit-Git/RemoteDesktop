@@ -184,20 +184,17 @@ function App() {
   const handleMouseWheel = (e) => {
     if (!hostId) return;
     
-    // Prevent default browser scrolling
+    // Prevent default scrolling
     e.preventDefault();
     
-    // Get the scroll direction and amount
-    // deltaY > 0 means scroll down, deltaY < 0 means scroll up
-    const scrollY = e.deltaY;
-    const scrollX = e.deltaX; // For horizontal scrolling if needed
+    // Get scroll direction and amount
+    const delta = e.deltaY || e.detail || e.wheelDelta;
     
-    console.log(`Scroll: X:${scrollX}, Y:${scrollY}`);
+    console.log("Mouse scroll:", delta);
     
     socket.emit("remote-mouse-scroll", {
       to: hostId,
-      scrollY: scrollY,
-      scrollX: scrollX
+      deltaY: delta
     });
   };
 

@@ -200,32 +200,27 @@ function createWindow() {
   // Handle mouse scrolling
   socket.on("remote-mouse-scroll", (data) => {
     try {
-      const { scrollY, scrollX } = data;
+      const { deltaY } = data;
       
-      // robotjs uses scroll amount in "clicks" where positive is up, negative is down
-      // But browser wheel events are opposite: positive is down, negative is up
-      // So we need to invert the value and normalize it
+      // In browser wheel events:
+      // deltaY > 0 means scroll down, deltaY < 0 means scroll up
+      // For robotjs, we need to convert this to direction and amount
       
-      // Calculate scroll amount (normalize to "clicks" - usually 1-3)
-      // A single mousewheel movement is typically around 100-125 pixels in browsers
-      let amount = Math.abs(Math.round(scrollY / 100));
-      if (amount === 0) amount = 1; // Ensure at least 1 click
+      // Determine scroll direction
+      const direction = deltaY < 0 ? "up" : "down";
       
-      // Determine direction (robotjs: "up" or "down")
-      const direction = scrollY < 0 ? "up" : "down";
+      // Calculate scroll amount (normalize it to something reasonable)
+      // Average wheel delta is around 100-125 per scroll "click"
+      const scrollAmount = Math.ceil(Math.abs(deltaY) / 100);
       
-      console.log(`Scrolling ${direction} by ${amount} clicks`);
+      console.log(`Scroll ${direction} by ${scrollAmount}`);
       
       // Execute the scroll
-      robot.scrollMouse(amount, direction);
+      for (let i = 0; i < scrollAmount; i++) {
+        robot.scrollMouse(1, direction);
+      }
       
-      // Handle horizontal scrolling if needed (uncomment if your app needs it)
-      // if (Math.abs(scrollX) > Math.abs(scrollY)) {
-      //   const horizAmount = Math.abs(Math.round(scrollX / 100));
-      //   const horizDir = scrollX < 0 ? "left" : "right";
-      //   robot.scrollMouse(horizAmount || 1, horizDir);
-      // }
-      
+      win.webContents.send('status-update', `Scrolled ${direction}`);
     } catch (err) {
       console.error("Error handling mouse scroll:", err);
     }
