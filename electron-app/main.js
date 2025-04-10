@@ -51,12 +51,12 @@ function createWindow() {
         try {
           const sources = await desktopCapturer.getSources({ 
             types: ['screen'],
-            thumbnailSize: { width: 800, height: 600 }
+            thumbnailSize: { width: 1280, height: 960 }
           });
           
           if (sources.length > 0) {
-            // Convert to base64 string to send via socket.io
-            const imageDataUrl = sources[0].thumbnail.toDataURL();
+            // Convert to base64 string with lower quality to reduce bit rate
+            const imageDataUrl = sources[0].thumbnail.toDataURL('image/jpeg', 0.6);
             socket.emit("screen-data", { 
               to: data.from,
               imageData: imageDataUrl
@@ -70,8 +70,8 @@ function createWindow() {
       // Send initial screen capture
       await sendScreen();
       
-      // Then send updates every 200ms
-      screenShareInterval = setInterval(sendScreen, 200);
+      // Then send updates every 300ms (increased interval to reduce bandwidth)
+      screenShareInterval = setInterval(sendScreen, 300);
     } catch (err) {
       console.error("Error setting up screen sharing:", err);
       win.webContents.send('status-update', 'Screen sharing error: ' + err.message);

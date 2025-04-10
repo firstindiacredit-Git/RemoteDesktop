@@ -217,14 +217,17 @@ function App() {
         <div>
           <canvas
             ref={canvasRef}
-            width="800"
-            height="600"
+            width="1280"
+            height="960"
             onMouseMove={handleMouseMove}
             onMouseDown={handleMouseClick}
             onContextMenu={handleContextMenu}
             onWheel={handleMouseWheel}
             style={{ 
-              border: '1px solid #ccc'
+              border: '1px solid #ccc',
+              width: '100%',
+              maxWidth: '1280px',
+              height: 'auto'
             }}
           />
           
