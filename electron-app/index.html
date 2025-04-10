@@ -161,6 +161,10 @@
     const keyboardStatus = document.getElementById('keyboardStatus');
     const statusMessage = document.getElementById('status-message');
     
+    // State variables
+    let currentHostId = null;
+    let keyboardActive = false;
+    
     // Make host mode active by default
     hostModeBtn.classList.add('active');
     hostView.style.display = 'block';
@@ -193,6 +197,7 @@
       // Clear hosts list when switching to controller mode
       if (mode === 'controller') {
         availableHosts.innerHTML = '<p>Waiting for available hosts...</p>';
+        availableHosts.style.display = 'block';
       }
       
       // Hide canvas until connected
@@ -242,6 +247,9 @@
     
     // Handle connection to host
     function connectToHost(hostId) {
+      currentHostId = hostId;
+      keyboardActive = true;
+      
       ipcRenderer.send('connect-to-host', hostId);
       remoteScreen.style.display = 'block'; // Show the canvas
       keyboardStatus.firstElementChild.textContent = 'Keyboard status: Active - Press any key';
@@ -261,14 +269,16 @@
       img.src = imageData;
     });
     
-    // Controller mouse handlers
+    // Mouse handlers
     remoteScreen.addEventListener('mousemove', (e) => {
+      if (!currentHostId) return;
+      
       const rect = remoteScreen.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       
       ipcRenderer.send('send-mouse-move', {
-        to: document.getElementById('connectionId').textContent,
+        to: currentHostId,
         x: x,
         y: y,
         screenWidth: rect.width,
@@ -278,6 +288,7 @@
     
     // Mouse click
     remoteScreen.addEventListener('mousedown', (e) => {
+      if (!currentHostId) return;
       e.preventDefault();
       
       let button = "left";
@@ -285,7 +296,7 @@
       if (e.button === 2) button = "right";
       
       ipcRenderer.send('send-mouse-click', {
-        to: document.getElementById('connectionId').textContent,
+        to: currentHostId,
         button: button
       });
     });
@@ -298,17 +309,18 @@
     
     // Mouse wheel
     remoteScreen.addEventListener('wheel', (e) => {
+      if (!currentHostId) return;
       e.preventDefault();
       
       ipcRenderer.send('send-mouse-scroll', {
-        to: document.getElementById('connectionId').textContent,
+        to: currentHostId,
         deltaY: e.deltaY
       });
     });
     
-    // Keyboard handling
+    // Global keyboard handling
     document.addEventListener('keydown', (e) => {
-      if (controllerView.style.display !== 'block') return;
+      if (!keyboardActive || !currentHostId) return;
       
       // Track modifier key states
       if (e.key === 'Shift') {
@@ -334,7 +346,7 @@
       
       // Send key event
       ipcRenderer.send('send-key-event', {
-        to: document.getElementById('connectionId').textContent,
+        to: currentHostId,
         type: "down",
         key: e.key,
         code: e.code,
@@ -350,7 +362,7 @@
     });
     
     document.addEventListener('keyup', (e) => {
-      if (controllerView.style.display !== 'block') return;
+      if (!keyboardActive || !currentHostId) return;
       
       // Track modifier key states
       if (e.key === 'Shift') {
@@ -369,7 +381,7 @@
       
       // Send key up event
       ipcRenderer.send('send-key-event', {
-        to: document.getElementById('connectionId').textContent,
+        to: currentHostId,
         type: "up",
         key: e.key,
         code: e.code,

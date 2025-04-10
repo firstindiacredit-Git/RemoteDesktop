@@ -73,18 +73,22 @@ function createWindow() {
   });
 
   ipcMain.on('send-mouse-move', (event, data) => {
+    console.log(`Sending mouse move to ${data.to}: ${data.x}, ${data.y}`);
     socket.emit("remote-mouse-move", data);
   });
 
   ipcMain.on('send-mouse-click', (event, data) => {
+    console.log(`Sending mouse click to ${data.to}: ${data.button}`);
     socket.emit("remote-mouse-click", data);
   });
 
   ipcMain.on('send-key-event', (event, data) => {
+    console.log(`Sending key ${data.type} to ${data.to}: ${data.key}`);
     socket.emit("remote-key-event", data);
   });
 
   ipcMain.on('send-mouse-scroll', (event, data) => {
+    console.log(`Sending mouse scroll to ${data.to}: ${data.deltaY}`);
     socket.emit("remote-mouse-scroll", data);
   });
 
@@ -157,6 +161,8 @@ function createWindow() {
       const scaledX = Math.round((x / screenWidth) * localWidth);
       const scaledY = Math.round((y / screenHeight) * localHeight);
       
+      console.log(`Moving mouse to ${scaledX},${scaledY}`);
+      
       // Move the mouse to the scaled position
       robot.moveMouse(scaledX, scaledY);
     } catch (err) {
@@ -170,6 +176,7 @@ function createWindow() {
     
     try {
       const { type, key, modifiers } = data;
+      console.log(`Received key ${type}: ${key}`);
       
       // Map keys from browser format to robotjs format
       const keyMap = {
@@ -244,6 +251,7 @@ function createWindow() {
     
     try {
       const { button } = data;
+      console.log(`Mouse click: ${button}`);
       robot.mouseClick(button || "left");
     } catch (err) {
       console.error("Error handling mouse click:", err);
@@ -263,6 +271,8 @@ function createWindow() {
       // Calculate scroll amount
       const scrollAmount = Math.ceil(Math.abs(deltaY) / 100);
       
+      console.log(`Scrolling ${direction} by ${scrollAmount}`);
+      
       // Execute the scroll
       for (let i = 0; i < scrollAmount; i++) {
         robot.scrollMouse(1, direction);
@@ -280,6 +290,7 @@ function createWindow() {
   });
   
   socket.on("host-available", (id) => {
+    console.log("Host available:", id);
     mainWindow.webContents.send('host-available', id);
   });
 
