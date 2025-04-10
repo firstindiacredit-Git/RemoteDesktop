@@ -11,6 +11,16 @@ const io = new Server(server, {
   cors: {
     origin: "*", // use specific domain in production
     methods: ["GET", "POST"]
+  },
+  pingInterval: 1000, // More frequent ping
+  pingTimeout: 2000, // Shorter ping timeout
+  connectTimeout: 10000, // Shorter connection timeout
+  maxHttpBufferSize: 5e6, // Limit buffer size to 5MB
+  transports: ['websocket'], // Only use websocket for faster connection
+  allowUpgrades: false, // Don't allow transport upgrades
+  httpCompression: true, // Enable compression
+  perMessageDeflate: {
+    threshold: 1024, // Only compress messages larger than 1KB
   }
 });
 
@@ -22,12 +32,33 @@ const registerSocketHandlers = require("./socketHandlers/index");
 // server.js
 io.on("connection", (socket) => {
   console.log("New connection with ID:", socket.id);
-
+  
+  // Add to clients map
+  clients.set(socket.id, {
+    lastActivity: Date.now(),
+    role: 'unknown'
+  });
+  
+  // Update client role when they announce as host
   socket.on("host-ready", () => {
+    // Update role
+    if (clients.has(socket.id)) {
+      clients.get(socket.id).role = 'host';
+      clients.get(socket.id).lastActivity = Date.now();
+    }
+    
     // Host computer announces it's ready to accept connections
     socket.broadcast.emit("host-available", socket.id);
   });
-
+  
+  // Update activity timestamp on any event
+  socket.use(([event, ...args], next) => {
+    if (clients.has(socket.id)) {
+      clients.get(socket.id).lastActivity = Date.now();
+    }
+    next();
+  });
+  
   socket.on("offer", (data) => {
     socket.to(data.to).emit("offer", {
       offer: data.offer,
@@ -80,16 +111,35 @@ io.on("connection", (socket) => {
   });
 
   socket.on("screen-data", (data) => {
-    // Forward screen data to the controller
-    socket.to(data.to).emit("screen-data", data);
+    // Forward screen data to the controller using volatile for less overhead
+    socket.volatile.to(data.to).emit("screen-data", data);
   });
 
-  socket.on("disconnect", () => {
-    console.log(`Socket ${socket.id} disconnected`);
+  // Handle disconnection with improved cleanup
+  socket.on("disconnect", (reason) => {
+    console.log(`Socket ${socket.id} disconnected, reason: ${reason}`);
+    // Remove from clients map
+    clients.delete(socket.id);
+    // Notify others
     socket.broadcast.emit("controller-disconnected", socket.id);
   });
 });
 
+// Set up a periodic check for stale connections (every 30 seconds)
+setInterval(() => {
+  const now = Date.now();
+  clients.forEach((client, id) => {
+    // If no activity for 2 minutes, forcibly disconnect
+    if (now - client.lastActivity > 120000) {
+      console.log(`Cleaning up stale connection: ${id}`);
+      const socket = io.sockets.sockets.get(id);
+      if (socket) {
+        socket.disconnect(true);
+      }
+      clients.delete(id);
+    }
+  });
+}, 30000);
 
 const PORT = 5000;
 server.listen(PORT, '0.0.0.0', () => {
