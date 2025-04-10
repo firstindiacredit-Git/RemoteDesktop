@@ -10,7 +10,7 @@ let socket;
 let screenShareInterval = null;
 let mode = "host"; // Default mode is host, can be "host" or "controller"
 let lastScreenshotTime = 0;
-const SCREEN_THROTTLE = 100; // Limit screen updates to once per 100ms
+const SCREEN_THROTTLE = 50; // Changed from 100ms to 50ms
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -31,8 +31,10 @@ function createWindow() {
     reconnectionAttempts: 10,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
-    timeout: 20000, // Increase timeout to 20 seconds
-    transports: ['websocket'], // Use only websockets for better performance
+    timeout: 20000,
+    transports: ['websocket'],
+    pingInterval: 2000,
+    pingTimeout: 5000,
   });
 
   // Handle connection
@@ -157,13 +159,14 @@ function createWindow() {
         try {
           const sources = await desktopCapturer.getSources({ 
             types: ['screen'],
-            thumbnailSize: { width: 800, height: 600 } // Reduced resolution
+            thumbnailSize: { width: 1024, height: 768 } // Increased resolution
           });
           
           if (sources.length > 0 && socket.connected) {
-            // Convert to base64 string with lower quality to reduce bit rate
-            const imageDataUrl = sources[0].thumbnail.toDataURL('image/jpeg', 0.5); // Lower quality
-            socket.volatile.emit("screen-data", { // Use volatile for screen updates
+            // Convert to base64 string with higher quality for better visual feedback
+            const imageDataUrl = sources[0].thumbnail.toDataURL('image/jpeg', 0.7); // Increased quality
+            // Use direct emit instead of volatile for more reliable delivery
+            socket.emit("screen-data", {
               to: data.from,
               imageData: imageDataUrl
             });
@@ -176,8 +179,8 @@ function createWindow() {
       // Send initial screen capture
       await sendScreen();
       
-      // Then send updates every 150ms (increased interval for better performance)
-      screenShareInterval = setInterval(sendScreen, 150);
+      // Then send updates every 80ms (reduced interval for better performance)
+      screenShareInterval = setInterval(sendScreen, 80);
     } catch (err) {
       console.error("Error setting up screen sharing:", err);
       mainWindow.webContents.send('status-update', 'Screen sharing error: ' + err.message);
@@ -325,7 +328,10 @@ function createWindow() {
   
   // Handle received screen data
   socket.on("screen-data", (data) => {
-    mainWindow.webContents.send('screen-data', data.imageData);
+    // Use setImmediate to prioritize screen updates
+    setImmediate(() => {
+      mainWindow.webContents.send('screen-data', data.imageData);
+    });
   });
   
   socket.on("host-available", (id) => {
