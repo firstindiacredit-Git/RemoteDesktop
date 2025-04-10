@@ -18,49 +18,21 @@ function App() {
     meta: false,
     capsLock: false
   });
-  const [connectionQuality, setConnectionQuality] = useState('Connecting...');
-  const frameTimeRef = useRef({ lastFrameTime: 0, frameCount: 0, fps: 0 });
 
   useEffect(() => {
     socket.on("host-available", (id) => {
       setAvailableHosts(prev => [...prev, id]);
     });
 
-    // Add handler for screen data with optimized rendering
+    // Add handler for screen data
     socket.on("screen-data", (data) => {
       if (!canvasRef.current) return;
       
       const img = new Image();
       img.onload = () => {
-        // Get canvas context
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d', { alpha: false }); // Disable alpha for better performance
-        
-        // Set canvas size on first frame or resolution change
-        if (data.screenWidth && data.screenHeight && 
-            (canvas.width !== data.screenWidth || canvas.height !== data.screenHeight)) {
-          canvas.width = data.screenWidth;
-          canvas.height = data.screenHeight;
-          
-          // Apply smooth image rendering
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          
-          // Apply CSS scaling
-          canvas.style.width = '100%';
-          canvas.style.height = 'auto';
-          canvas.style.maxHeight = '85vh';
-        }
-        
-        // Draw the image
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const ctx = canvasRef.current.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
       };
-      
-      // Error handling for image loading
-      img.onerror = (err) => {
-        console.error("Error loading screen image:", err);
-      };
-      
       img.src = data.imageData;
     });
 
@@ -150,7 +122,7 @@ function App() {
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [hostId, modifierKeys]); // Include hostId and modifierKeys in dependencies
 
   const connectToHost = (id) => {
     setHostId(id);
@@ -226,29 +198,6 @@ function App() {
     });
   };
 
-  // Add this inside the screen-data handler to monitor performance
-  socket.on("screen-data", (data) => {
-    // Calculate and update FPS (frames per second)
-    const now = performance.now();
-    const frameTime = frameTimeRef.current;
-    
-    if (now - frameTime.lastFrameTime >= 1000) {
-      // Update connection quality indicator based on FPS
-      const fps = frameTime.frameCount;
-      frameTime.fps = fps;
-      frameTime.frameCount = 0;
-      frameTime.lastFrameTime = now;
-      
-      let quality = 'Poor';
-      if (fps >= 5) quality = 'Good';
-      else if (fps >= 2) quality = 'Fair';
-      
-      setConnectionQuality(`${quality} (${fps} FPS)`);
-    } else {
-      frameTime.frameCount++;
-    }
-  });
-
   return (
     <div>
       <h2>Remote Control - Controller</h2>
@@ -265,26 +214,17 @@ function App() {
       )}
 
       {connected && (
-        <div style={{ width: '100%', maxWidth: '1920px', margin: '0 auto' }}>
-          <div style={{ 
-            padding: '5px 10px', 
-            backgroundColor: '#f0f0f0', 
-            borderRadius: '4px',
-            margin: '5px 0',
-            fontSize: '14px'
-          }}>
-            Connection: {connectionQuality}
-          </div>
+        <div>
           <canvas
             ref={canvasRef}
+            width="800"
+            height="600"
             onMouseMove={handleMouseMove}
             onMouseDown={handleMouseClick}
             onContextMenu={handleContextMenu}
             onWheel={handleMouseWheel}
             style={{ 
-              border: '1px solid #ccc',
-              width: '100%',
-              height: 'auto'
+              border: '1px solid #ccc'
             }}
           />
           

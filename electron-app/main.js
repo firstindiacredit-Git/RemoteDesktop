@@ -46,38 +46,21 @@ function createWindow() {
         clearInterval(screenShareInterval);
       }
       
-      // Keep track of the last image to calculate difference
-      let lastImageData = null;
-      
-      // Function to capture and send screen with optimized bit rate
+      // Function to capture and send screen
       const sendScreen = async () => {
         try {
-          // Maintain high resolution
           const sources = await desktopCapturer.getSources({ 
             types: ['screen'],
-            thumbnailSize: { 
-              width: 1920,
-              height: 1080
-            }
+            thumbnailSize: { width: 800, height: 600 }
           });
           
           if (sources.length > 0) {
-            // Reduce quality to lower bit rate but keep resolution
-            // The third parameter is quality (0.0-1.0) - lower means less bandwidth
-            const imageDataUrl = sources[0].thumbnail.toDataURL('image/jpeg', 0.5);  // Reduced from 0.8 to 0.5
-            
-            // Only send if there's a significant change or it's been a while
-            // This avoids sending redundant frames when screen is static
-            if (!lastImageData || lastImageData !== imageDataUrl) {
-              socket.emit("screen-data", { 
-                to: data.from,
-                imageData: imageDataUrl,
-                screenWidth: 1920,
-                screenHeight: 1080
-              });
-              
-              lastImageData = imageDataUrl;
-            }
+            // Convert to base64 string to send via socket.io
+            const imageDataUrl = sources[0].thumbnail.toDataURL();
+            socket.emit("screen-data", { 
+              to: data.from,
+              imageData: imageDataUrl
+            });
           }
         } catch (err) {
           console.error("Error capturing screen:", err);
@@ -87,9 +70,8 @@ function createWindow() {
       // Send initial screen capture
       await sendScreen();
       
-      // Reduce update frequency to save bandwidth
-      // Increase interval from 250ms to 400ms (2.5 updates per second instead of 4)
-      screenShareInterval = setInterval(sendScreen, 400);
+      // Then send updates every 200ms
+      screenShareInterval = setInterval(sendScreen, 200);
     } catch (err) {
       console.error("Error setting up screen sharing:", err);
       win.webContents.send('status-update', 'Screen sharing error: ' + err.message);
