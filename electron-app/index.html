@@ -2,12 +2,13 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Remote Desktop Host</title>
+  <title>Remote Desktop App</title>
   <style>
     body {
       font-family: Arial, sans-serif;
       padding: 20px;
       background-color: #f0f0f0;
+      margin: 0;
     }
     h2 {
       color: #333;
@@ -22,24 +23,365 @@
       font-weight: bold;
       color: #0277bd;
     }
+    .container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .header {
+      padding: 10px;
+      background-color: #2196F3;
+      color: white;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .content {
+      flex: 1;
+      padding: 20px;
+      overflow: auto;
+    }
+    .mode-buttons {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .mode-button {
+      padding: 10px 20px;
+      margin: 0 10px;
+      font-size: 16px;
+      cursor: pointer;
+      border: none;
+      border-radius: 4px;
+      background-color: #e0e0e0;
+      transition: background-color 0.3s;
+    }
+    .mode-button.active {
+      background-color: #2196F3;
+      color: white;
+    }
+    .host-view, .controller-view {
+      display: none;
+    }
+    canvas {
+      border: 1px solid #ccc;
+      width: 100%;
+      max-width: 1280px;
+      height: auto;
+    }
+    .hosts-list {
+      margin-top: 20px;
+    }
+    .host-btn {
+      display: block;
+      width: 100%;
+      margin-bottom: 10px;
+      padding: 10px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .keyboard-status {
+      margin-top: 10px; 
+      padding: 8px; 
+      background-color: #e6ffe6;
+      border-radius: 4px;
+    }
+    .modifier-key {
+      padding: 3px 6px;
+      margin: 0 3px;
+      background-color: #e6e6e6;
+      color: black;
+      border-radius: 3px;
+      display: inline-block;
+    }
+    .modifier-key.active {
+      background-color: #007bff;
+      color: white;
+    }
   </style>
 </head>
 <body>
-  <h2>Remote Desktop Host</h2>
-  <div class="status">
-    Connection ID: <span id="connectionId">Connecting...</span>
+  <div class="container">
+    <div class="header">
+      <h2>Remote Desktop App</h2>
+      <div>Connection ID: <span id="connectionId">Connecting...</span></div>
+    </div>
+    
+    <div class="content">
+      <div class="mode-buttons">
+        <button class="mode-button" id="hostModeBtn">Host Mode</button>
+        <button class="mode-button" id="controllerModeBtn">Controller Mode</button>
+      </div>
+      
+      <div id="status-message">Waiting for connection...</div>
+      
+      <!-- Host View -->
+      <div id="hostView" class="host-view">
+        <h3>Host Mode</h3>
+        <p>Your computer is now accessible for remote control.</p>
+        <p>Share your Connection ID with someone who wants to control your computer.</p>
+      </div>
+      
+      <!-- Controller View -->
+      <div id="controllerView" class="controller-view">
+        <h3>Controller Mode</h3>
+        <div class="hosts-list" id="availableHosts">
+          <p>Waiting for available hosts...</p>
+        </div>
+        
+        <canvas id="remoteScreen" width="1280" height="960"></canvas>
+        
+        <div class="keyboard-status" id="keyboardStatus">
+          <strong>Keyboard status:</strong> Not active
+          <div>
+            <span class="modifier-key" id="shift-key">Shift</span>
+            <span class="modifier-key" id="ctrl-key">Ctrl</span>
+            <span class="modifier-key" id="alt-key">Alt</span>
+            <span class="modifier-key" id="caps-key">Caps</span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
-  <div id="status-message">Waiting for connection...</div>
 
   <script>
     const { ipcRenderer } = require('electron');
     
+    // DOM Elements
+    const hostView = document.getElementById('hostView');
+    const controllerView = document.getElementById('controllerView');
+    const hostModeBtn = document.getElementById('hostModeBtn');
+    const controllerModeBtn = document.getElementById('controllerModeBtn');
+    const availableHosts = document.getElementById('availableHosts');
+    const remoteScreen = document.getElementById('remoteScreen');
+    const keyboardStatus = document.getElementById('keyboardStatus');
+    const statusMessage = document.getElementById('status-message');
+    
+    // Make host mode active by default
+    hostModeBtn.classList.add('active');
+    hostView.style.display = 'block';
+    
+    // Mode switchers
+    hostModeBtn.addEventListener('click', () => {
+      setMode('host');
+      ipcRenderer.send('change-mode', 'host');
+    });
+    
+    controllerModeBtn.addEventListener('click', () => {
+      setMode('controller');
+      ipcRenderer.send('change-mode', 'controller');
+    });
+    
+    function setMode(mode) {
+      // Update UI
+      if (mode === 'host') {
+        hostModeBtn.classList.add('active');
+        controllerModeBtn.classList.remove('active');
+        hostView.style.display = 'block';
+        controllerView.style.display = 'none';
+      } else {
+        hostModeBtn.classList.remove('active');
+        controllerModeBtn.classList.add('active');
+        hostView.style.display = 'none';
+        controllerView.style.display = 'block';
+      }
+      
+      // Clear hosts list when switching to controller mode
+      if (mode === 'controller') {
+        availableHosts.innerHTML = '<p>Waiting for available hosts...</p>';
+      }
+      
+      // Hide canvas until connected
+      remoteScreen.style.display = 'none';
+    }
+    
+    // Track modifier key states
+    const modifierKeys = {
+      shift: false,
+      control: false,
+      alt: false,
+      meta: false,
+      capsLock: false
+    };
+    
+    // Connection ID
     ipcRenderer.on('connection-id', (event, id) => {
       document.getElementById('connectionId').textContent = id;
     });
     
+    // Status updates
     ipcRenderer.on('status-update', (event, message) => {
-      document.getElementById('status-message').textContent = message;
+      statusMessage.textContent = message;
+    });
+    
+    // Mode changed
+    ipcRenderer.on('mode-changed', (event, mode) => {
+      setMode(mode);
+    });
+    
+    // Available hosts
+    ipcRenderer.on('host-available', (event, hostId) => {
+      // Clear the "waiting" message if it's the first host
+      if (availableHosts.innerHTML.includes('Waiting')) {
+        availableHosts.innerHTML = '';
+      }
+      
+      // Create a button for the host
+      const hostBtn = document.createElement('button');
+      hostBtn.className = 'host-btn';
+      hostBtn.textContent = `Connect to Host: ${hostId}`;
+      hostBtn.onclick = () => connectToHost(hostId);
+      
+      // Add to the list
+      availableHosts.appendChild(hostBtn);
+    });
+    
+    // Handle connection to host
+    function connectToHost(hostId) {
+      ipcRenderer.send('connect-to-host', hostId);
+      remoteScreen.style.display = 'block'; // Show the canvas
+      keyboardStatus.firstElementChild.textContent = 'Keyboard status: Active - Press any key';
+      
+      // Update UI
+      statusMessage.textContent = `Connecting to host ${hostId}...`;
+      availableHosts.style.display = 'none';
+    }
+    
+    // Screen data from host
+    ipcRenderer.on('screen-data', (event, imageData) => {
+      const ctx = remoteScreen.getContext('2d');
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, remoteScreen.width, remoteScreen.height);
+      };
+      img.src = imageData;
+    });
+    
+    // Controller mouse handlers
+    remoteScreen.addEventListener('mousemove', (e) => {
+      const rect = remoteScreen.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      ipcRenderer.send('send-mouse-move', {
+        to: document.getElementById('connectionId').textContent,
+        x: x,
+        y: y,
+        screenWidth: rect.width,
+        screenHeight: rect.height
+      });
+    });
+    
+    // Mouse click
+    remoteScreen.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      
+      let button = "left";
+      if (e.button === 1) button = "middle";
+      if (e.button === 2) button = "right";
+      
+      ipcRenderer.send('send-mouse-click', {
+        to: document.getElementById('connectionId').textContent,
+        button: button
+      });
+    });
+    
+    // Prevent context menu
+    remoteScreen.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      return false;
+    });
+    
+    // Mouse wheel
+    remoteScreen.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      
+      ipcRenderer.send('send-mouse-scroll', {
+        to: document.getElementById('connectionId').textContent,
+        deltaY: e.deltaY
+      });
+    });
+    
+    // Keyboard handling
+    document.addEventListener('keydown', (e) => {
+      if (controllerView.style.display !== 'block') return;
+      
+      // Track modifier key states
+      if (e.key === 'Shift') {
+        modifierKeys.shift = true;
+        document.getElementById('shift-key').classList.add('active');
+      } else if (e.key === 'Control') {
+        modifierKeys.control = true;
+        document.getElementById('ctrl-key').classList.add('active');
+      } else if (e.key === 'Alt') {
+        modifierKeys.alt = true;
+        document.getElementById('alt-key').classList.add('active');
+      } else if (e.key === 'CapsLock') {
+        modifierKeys.capsLock = !modifierKeys.capsLock;
+        if (modifierKeys.capsLock) {
+          document.getElementById('caps-key').classList.add('active');
+        } else {
+          document.getElementById('caps-key').classList.remove('active');
+        }
+      }
+      
+      // Prevent defaults to avoid browser actions
+      e.preventDefault();
+      
+      // Send key event
+      ipcRenderer.send('send-key-event', {
+        to: document.getElementById('connectionId').textContent,
+        type: "down",
+        key: e.key,
+        code: e.code,
+        keyCode: e.keyCode,
+        modifiers: {
+          shift: e.shiftKey,
+          control: e.ctrlKey,
+          alt: e.altKey,
+          meta: e.metaKey,
+          capsLock: e.getModifierState('CapsLock')
+        }
+      });
+    });
+    
+    document.addEventListener('keyup', (e) => {
+      if (controllerView.style.display !== 'block') return;
+      
+      // Track modifier key states
+      if (e.key === 'Shift') {
+        modifierKeys.shift = false;
+        document.getElementById('shift-key').classList.remove('active');
+      } else if (e.key === 'Control') {
+        modifierKeys.control = false;
+        document.getElementById('ctrl-key').classList.remove('active');
+      } else if (e.key === 'Alt') {
+        modifierKeys.alt = false;
+        document.getElementById('alt-key').classList.remove('active');
+      }
+      
+      // Prevent defaults to avoid browser actions
+      e.preventDefault();
+      
+      // Send key up event
+      ipcRenderer.send('send-key-event', {
+        to: document.getElementById('connectionId').textContent,
+        type: "up",
+        key: e.key,
+        code: e.code,
+        keyCode: e.keyCode,
+        modifiers: {
+          shift: e.shiftKey,
+          control: e.ctrlKey,
+          alt: e.altKey,
+          meta: e.metaKey,
+          capsLock: e.getModifierState('CapsLock')
+        }
+      });
     });
   </script>
 </body>

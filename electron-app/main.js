@@ -1,14 +1,19 @@
-// electron-app/robotjsControl.js
+// electron-app/main.js
 
-const { app, BrowserWindow, desktopCapturer } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 const robot = require("robotjs");
 const io = require("socket.io-client");
 const path = require("path");
 
+let mainWindow;
+let socket;
+let screenShareInterval = null;
+let mode = "host"; // Default mode is host, can be "host" or "controller"
+
 function createWindow() {
-  const win = new BrowserWindow({
-    width: 800,
-    height: 600,
+  mainWindow = new BrowserWindow({
+    width: 1024,
+    height: 768,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -16,35 +21,95 @@ function createWindow() {
   });
 
   // Load the HTML file
-  win.loadFile(path.join(__dirname, 'index.html'));
+  mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
   // Connect to the socket.io server
-  const socket = io("http://192.168.29.140:5000"); // Change to your server IP if needed
-  let screenShareInterval = null;
+  socket = io("http://192.168.29.140:5000"); // Change to your server IP if needed
 
   // Handle connection
   socket.on("connect", () => {
-    console.log("Connected as host with ID:", socket.id);
-    win.webContents.send('connection-id', socket.id);
-    socket.emit("host-ready");
+    console.log(`Connected as ${mode} with ID:`, socket.id);
+    mainWindow.webContents.send('connection-id', socket.id);
+    
+    if (mode === "host") {
+      socket.emit("host-ready");
+    }
   });
 
+  // IPC communication with renderer
+  ipcMain.on('change-mode', (event, newMode) => {
+    mode = newMode;
+    
+    // Disconnect and reconnect to update role
+    if (socket.connected) {
+      socket.disconnect();
+    }
+    
+    // Clear any existing interval
+    if (screenShareInterval) {
+      clearInterval(screenShareInterval);
+      screenShareInterval = null;
+    }
+    
+    // Reconnect with new mode
+    socket.connect();
+    
+    // Update UI
+    mainWindow.webContents.send('mode-changed', mode);
+  });
+
+  // Handle controller requests
+  ipcMain.on('connect-to-host', (event, hostId) => {
+    console.log(`Connecting to host: ${hostId}`);
+    socket.emit("connect-to-host", hostId);
+    
+    // Request screen data
+    socket.emit("request-screen", {
+      to: hostId,
+      from: socket.id
+    });
+    
+    mainWindow.webContents.send('status-update', `Connecting to host ${hostId}...`);
+  });
+
+  ipcMain.on('send-mouse-move', (event, data) => {
+    socket.emit("remote-mouse-move", data);
+  });
+
+  ipcMain.on('send-mouse-click', (event, data) => {
+    socket.emit("remote-mouse-click", data);
+  });
+
+  ipcMain.on('send-key-event', (event, data) => {
+    socket.emit("remote-key-event", data);
+  });
+
+  ipcMain.on('send-mouse-scroll', (event, data) => {
+    socket.emit("remote-mouse-scroll", data);
+  });
+
+  // --- HOST MODE HANDLERS ---
+  
   // Handle controller connection
   socket.on("controller-connected", (controllerId) => {
     console.log("Controller connected:", controllerId);
-    win.webContents.send('status-update', `Controller ${controllerId} connected`);
+    mainWindow.webContents.send('status-update', `Controller ${controllerId} connected`);
   });
 
   // Start screen sharing when requested
   socket.on("request-screen", async (data) => {
+    if (mode !== "host") return;
+    
     try {
       console.log("Screen sharing requested by:", data.from);
-      win.webContents.send('status-update', 'Starting screen sharing...');
+      mainWindow.webContents.send('status-update', 'Starting screen sharing...');
       
       // Clear any existing interval
       if (screenShareInterval) {
         clearInterval(screenShareInterval);
       }
+      
+      const { desktopCapturer } = require("electron");
       
       // Function to capture and send screen
       const sendScreen = async () => {
@@ -74,21 +139,14 @@ function createWindow() {
       screenShareInterval = setInterval(sendScreen, 300);
     } catch (err) {
       console.error("Error setting up screen sharing:", err);
-      win.webContents.send('status-update', 'Screen sharing error: ' + err.message);
+      mainWindow.webContents.send('status-update', 'Screen sharing error: ' + err.message);
     }
   });
 
-  // Handle when controller disconnects
-  socket.on("controller-disconnected", () => {
-    if (screenShareInterval) {
-      clearInterval(screenShareInterval);
-      screenShareInterval = null;
-    }
-    win.webContents.send('status-update', 'Controller disconnected');
-  });
-
-  // Handle mouse movement with improved positioning
+  // Handle improved mouse movements from controller
   socket.on("remote-mouse-move", (data) => {
+    if (mode !== "host") return;
+    
     try {
       const { x, y, screenWidth, screenHeight } = data;
       
@@ -99,8 +157,6 @@ function createWindow() {
       const scaledX = Math.round((x / screenWidth) * localWidth);
       const scaledY = Math.round((y / screenHeight) * localHeight);
       
-      console.log(`Mouse move: Original(${x},${y}) => Scaled(${scaledX},${scaledY})`);
-      
       // Move the mouse to the scaled position
       robot.moveMouse(scaledX, scaledY);
     } catch (err) {
@@ -110,9 +166,10 @@ function createWindow() {
 
   // Handle improved key events (down/up)
   socket.on("remote-key-event", (data) => {
+    if (mode !== "host") return;
+    
     try {
       const { type, key, modifiers } = data;
-      console.log(`Received key ${type}:`, key, "Modifiers:", JSON.stringify(modifiers));
       
       // Map keys from browser format to robotjs format
       const keyMap = {
@@ -146,9 +203,7 @@ function createWindow() {
         // let's use a key tap approach
         if (type === 'down') {
           robot.keyTap('caps_lock');
-          console.log("Tapped caps_lock key");
         }
-        win.webContents.send('status-update', `CapsLock tap`);
         return;
       }
       
@@ -178,17 +233,15 @@ function createWindow() {
           robot.keyToggle(robotKey, 'up');
         }
       }
-      
-      win.webContents.send('status-update', `Key ${type}: ${key}`);
     } catch (err) {
       console.error(`Error handling key ${type}:`, err);
-      console.error("Key data:", data);
-      win.webContents.send('status-update', `Error with key ${type}: ${data.key} - ${err.message}`);
     }
   });
 
   // Handle mouse click
   socket.on("remote-mouse-click", (data) => {
+    if (mode !== "host") return;
+    
     try {
       const { button } = data;
       robot.mouseClick(button || "left");
@@ -199,31 +252,44 @@ function createWindow() {
 
   // Handle mouse scrolling
   socket.on("remote-mouse-scroll", (data) => {
+    if (mode !== "host") return;
+    
     try {
       const { deltaY } = data;
-      
-      // In browser wheel events:
-      // deltaY > 0 means scroll down, deltaY < 0 means scroll up
-      // For robotjs, we need to convert this to direction and amount
       
       // Determine scroll direction
       const direction = deltaY < 0 ? "up" : "down";
       
-      // Calculate scroll amount (normalize it to something reasonable)
-      // Average wheel delta is around 100-125 per scroll "click"
+      // Calculate scroll amount
       const scrollAmount = Math.ceil(Math.abs(deltaY) / 100);
-      
-      console.log(`Scroll ${direction} by ${scrollAmount}`);
       
       // Execute the scroll
       for (let i = 0; i < scrollAmount; i++) {
         robot.scrollMouse(1, direction);
       }
-      
-      win.webContents.send('status-update', `Scrolled ${direction}`);
     } catch (err) {
       console.error("Error handling mouse scroll:", err);
     }
+  });
+
+  // --- CONTROLLER MODE HANDLERS ---
+  
+  // Handle received screen data
+  socket.on("screen-data", (data) => {
+    mainWindow.webContents.send('screen-data', data.imageData);
+  });
+  
+  socket.on("host-available", (id) => {
+    mainWindow.webContents.send('host-available', id);
+  });
+
+  // Handle when controller disconnects
+  socket.on("controller-disconnected", () => {
+    if (screenShareInterval) {
+      clearInterval(screenShareInterval);
+      screenShareInterval = null;
+    }
+    mainWindow.webContents.send('status-update', 'Controller disconnected');
   });
 
   // Handle disconnection
@@ -233,11 +299,11 @@ function createWindow() {
       screenShareInterval = null;
     }
     console.log("Disconnected from server");
-    win.webContents.send('status-update', 'Disconnected from server');
+    mainWindow.webContents.send('status-update', 'Disconnected from server');
   });
 
   // Handle window close
-  win.on('closed', () => {
+  mainWindow.on('closed', () => {
     if (screenShareInterval) {
       clearInterval(screenShareInterval);
     }
@@ -260,7 +326,3 @@ app.on('activate', () => {
     createWindow();
   }
 });
-
-module.exports = { createWindow };
-
-
