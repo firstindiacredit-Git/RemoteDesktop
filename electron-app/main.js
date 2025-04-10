@@ -18,28 +18,15 @@ function createWindow() {
   // Load the HTML file
   win.loadFile(path.join(__dirname, 'index.html'));
 
-  // Connect to the socket.io server with reconnection settings
-  const socket = io("http://192.168.29.140:5000", {
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000,
-    timeout: 20000
-  });
+  // Connect to the socket.io server
+  const socket = io("http://192.168.29.140:5000"); // Change to your server IP if needed
   let screenShareInterval = null;
-  let pingInterval = null;
 
   // Handle connection
   socket.on("connect", () => {
     console.log("Connected as host with ID:", socket.id);
     win.webContents.send('connection-id', socket.id);
     socket.emit("host-ready");
-    
-    // Setup ping interval to keep connection alive
-    if (pingInterval) clearInterval(pingInterval);
-    pingInterval = setInterval(() => {
-      socket.emit("keep-alive");
-    }, 10000); // Send a ping every 10 seconds
   });
 
   // Handle controller connection
@@ -239,40 +226,20 @@ function createWindow() {
     }
   });
 
-  // Handle reconnection attempts
-  socket.io.on("reconnect_attempt", (attempt) => {
-    console.log(`Reconnection attempt ${attempt}`);
-    win.webContents.send('status-update', `Reconnecting to server... (attempt ${attempt})`);
-  });
-
-  socket.io.on("reconnect", () => {
-    console.log("Reconnected to server");
-    win.webContents.send('status-update', 'Reconnected to server');
-    
-    // Re-register as host when reconnected
-    socket.emit("host-ready");
-  });
-
   // Handle disconnection
-  socket.on("disconnect", (reason) => {
-    console.log("Disconnected from server:", reason);
-    win.webContents.send('status-update', `Disconnected: ${reason}. Attempting to reconnect...`);
-    
-    // Don't clear screen sharing interval here - wait for reconnection
-    if (reason === "io server disconnect") {
-      // the disconnection was initiated by the server, reconnect manually
-      socket.connect();
+  socket.on("disconnect", () => {
+    if (screenShareInterval) {
+      clearInterval(screenShareInterval);
+      screenShareInterval = null;
     }
-    // else the socket will automatically try to reconnect
+    console.log("Disconnected from server");
+    win.webContents.send('status-update', 'Disconnected from server');
   });
 
   // Handle window close
   win.on('closed', () => {
     if (screenShareInterval) {
       clearInterval(screenShareInterval);
-    }
-    if (pingInterval) {
-      clearInterval(pingInterval);
     }
     socket.disconnect();
   });
