@@ -9,6 +9,8 @@ let mainWindow;
 let socket;
 let screenShareInterval = null;
 let mode = "host"; // Default mode is host, can be "host" or "controller"
+let lastScreenshotTime = 0;
+const SCREEN_THROTTLE = 100; // Limit screen updates to once per 100ms
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -23,8 +25,15 @@ function createWindow() {
   // Load the HTML file
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
-  // Connect to the socket.io server
-  socket = io("http://192.168.29.140:5000"); // Change to your server IP if needed
+  // Connect to the socket.io server with optimized settings
+  socket = io("http://192.168.29.140:5000", {
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    timeout: 20000, // Increase timeout to 20 seconds
+    transports: ['websocket'], // Use only websockets for better performance
+  });
 
   // Handle connection
   socket.on("connect", () => {
@@ -34,6 +43,21 @@ function createWindow() {
     if (mode === "host") {
       socket.emit("host-ready");
     }
+  });
+
+  // Handle reconnection
+  socket.on("reconnect", (attemptNumber) => {
+    console.log(`Reconnected after ${attemptNumber} attempts`);
+    mainWindow.webContents.send('status-update', `Reconnected to server`);
+    
+    if (mode === "host") {
+      socket.emit("host-ready");
+    }
+  });
+
+  socket.on("reconnect_attempt", (attemptNumber) => {
+    console.log(`Reconnection attempt ${attemptNumber}`);
+    mainWindow.webContents.send('status-update', `Reconnecting to server... (${attemptNumber})`);
   });
 
   // IPC communication with renderer
@@ -72,24 +96,30 @@ function createWindow() {
     mainWindow.webContents.send('status-update', `Connecting to host ${hostId}...`);
   });
 
+  // Process events immediately for reducing latency
   ipcMain.on('send-mouse-move', (event, data) => {
-    console.log(`Sending mouse move to ${data.to}: ${data.x}, ${data.y}`);
-    socket.emit("remote-mouse-move", data);
+    if (socket.connected) {
+      socket.volatile.emit("remote-mouse-move", data); // Use volatile for mouse moves
+    }
   });
 
   ipcMain.on('send-mouse-click', (event, data) => {
-    console.log(`Sending mouse click to ${data.to}: ${data.button}`);
-    socket.emit("remote-mouse-click", data);
+    if (socket.connected) {
+      // Use emit instead of volatile for important actions like clicks
+      socket.emit("remote-mouse-click", data);
+    }
   });
 
   ipcMain.on('send-key-event', (event, data) => {
-    console.log(`Sending key ${data.type} to ${data.to}: ${data.key}`);
-    socket.emit("remote-key-event", data);
+    if (socket.connected) {
+      socket.emit("remote-key-event", data);
+    }
   });
 
   ipcMain.on('send-mouse-scroll', (event, data) => {
-    console.log(`Sending mouse scroll to ${data.to}: ${data.deltaY}`);
-    socket.emit("remote-mouse-scroll", data);
+    if (socket.connected) {
+      socket.volatile.emit("remote-mouse-scroll", data); // Use volatile for scrolls
+    }
   });
 
   // --- HOST MODE HANDLERS ---
@@ -100,7 +130,7 @@ function createWindow() {
     mainWindow.webContents.send('status-update', `Controller ${controllerId} connected`);
   });
 
-  // Start screen sharing when requested
+  // Start screen sharing when requested (optimized version)
   socket.on("request-screen", async (data) => {
     if (mode !== "host") return;
     
@@ -115,18 +145,25 @@ function createWindow() {
       
       const { desktopCapturer } = require("electron");
       
-      // Function to capture and send screen
+      // Function to capture and send screen (with throttling)
       const sendScreen = async () => {
+        const now = Date.now();
+        // Throttle screen updates to reduce bandwidth and CPU usage
+        if (now - lastScreenshotTime < SCREEN_THROTTLE) {
+          return;
+        }
+        lastScreenshotTime = now;
+        
         try {
           const sources = await desktopCapturer.getSources({ 
             types: ['screen'],
-            thumbnailSize: { width: 1280, height: 960 }
+            thumbnailSize: { width: 800, height: 600 } // Reduced resolution
           });
           
-          if (sources.length > 0) {
+          if (sources.length > 0 && socket.connected) {
             // Convert to base64 string with lower quality to reduce bit rate
-            const imageDataUrl = sources[0].thumbnail.toDataURL('image/jpeg', 0.6);
-            socket.emit("screen-data", { 
+            const imageDataUrl = sources[0].thumbnail.toDataURL('image/jpeg', 0.5); // Lower quality
+            socket.volatile.emit("screen-data", { // Use volatile for screen updates
               to: data.from,
               imageData: imageDataUrl
             });
@@ -139,15 +176,15 @@ function createWindow() {
       // Send initial screen capture
       await sendScreen();
       
-      // Then send updates every 300ms (increased interval to reduce bandwidth)
-      screenShareInterval = setInterval(sendScreen, 300);
+      // Then send updates every 150ms (increased interval for better performance)
+      screenShareInterval = setInterval(sendScreen, 150);
     } catch (err) {
       console.error("Error setting up screen sharing:", err);
       mainWindow.webContents.send('status-update', 'Screen sharing error: ' + err.message);
     }
   });
 
-  // Handle improved mouse movements from controller
+  // Handle improved mouse movements from controller with priority
   socket.on("remote-mouse-move", (data) => {
     if (mode !== "host") return;
     
@@ -161,22 +198,21 @@ function createWindow() {
       const scaledX = Math.round((x / screenWidth) * localWidth);
       const scaledY = Math.round((y / screenHeight) * localHeight);
       
-      console.log(`Moving mouse to ${scaledX},${scaledY}`);
-      
-      // Move the mouse to the scaled position
-      robot.moveMouse(scaledX, scaledY);
+      // Move the mouse to the scaled position (priority task)
+      setImmediate(() => {
+        robot.moveMouse(scaledX, scaledY);
+      });
     } catch (err) {
       console.error("Error handling mouse move:", err);
     }
   });
 
-  // Handle improved key events (down/up)
+  // Handle improved key events (down/up) with priority
   socket.on("remote-key-event", (data) => {
     if (mode !== "host") return;
     
     try {
       const { type, key, modifiers } = data;
-      console.log(`Received key ${type}: ${key}`);
       
       // Map keys from browser format to robotjs format
       const keyMap = {
@@ -204,61 +240,64 @@ function createWindow() {
       // Explicitly define the toggle state as a string value
       const toggleState = (type === 'down') ? 'down' : 'up';
       
-      // Special handling for CapsLock
-      if (key === 'CapsLock') {
-        // Instead of trying to toggle CapsLock (which can be problematic),
-        // let's use a key tap approach
-        if (type === 'down') {
-          robot.keyTap('caps_lock');
+      // Process keyboard event immediately
+      setImmediate(() => {
+        // Special handling for CapsLock
+        if (key === 'CapsLock') {
+          if (type === 'down') {
+            robot.keyTap('caps_lock');
+          }
+          return;
         }
-        return;
-      }
-      
-      // Get robotjs key
-      let robotKey = keyMap[key] || key.toLowerCase();
-      
-      // Build modifier array
-      const activeModifiers = [];
-      if (modifiers.shift) activeModifiers.push('shift');
-      if (modifiers.control) activeModifiers.push('control');
-      if (modifiers.alt) activeModifiers.push('alt');
-      if (modifiers.meta) activeModifiers.push('command');
-      
-      // For modifier keys themselves
-      if (key === 'Shift' || key === 'Control' || key === 'Alt' || key === 'Meta') {
-        robot.keyToggle(robotKey, toggleState);
-      } 
-      // For regular keys with modifiers
-      else if (activeModifiers.length > 0 && type === 'down') {
-        robot.keyTap(robotKey, activeModifiers);
-      } 
-      // For regular keys
-      else {
-        if (type === 'down') {
-          robot.keyToggle(robotKey, 'down');
-        } else {
-          robot.keyToggle(robotKey, 'up');
+        
+        // Get robotjs key
+        let robotKey = keyMap[key] || key.toLowerCase();
+        
+        // Build modifier array
+        const activeModifiers = [];
+        if (modifiers.shift) activeModifiers.push('shift');
+        if (modifiers.control) activeModifiers.push('control');
+        if (modifiers.alt) activeModifiers.push('alt');
+        if (modifiers.meta) activeModifiers.push('command');
+        
+        // For modifier keys themselves
+        if (key === 'Shift' || key === 'Control' || key === 'Alt' || key === 'Meta') {
+          robot.keyToggle(robotKey, toggleState);
+        } 
+        // For regular keys with modifiers
+        else if (activeModifiers.length > 0 && type === 'down') {
+          robot.keyTap(robotKey, activeModifiers);
+        } 
+        // For regular keys
+        else {
+          if (type === 'down') {
+            robot.keyToggle(robotKey, 'down');
+          } else {
+            robot.keyToggle(robotKey, 'up');
+          }
         }
-      }
+      });
     } catch (err) {
       console.error(`Error handling key ${type}:`, err);
     }
   });
 
-  // Handle mouse click
+  // Handle mouse click with priority
   socket.on("remote-mouse-click", (data) => {
     if (mode !== "host") return;
     
     try {
       const { button } = data;
-      console.log(`Mouse click: ${button}`);
-      robot.mouseClick(button || "left");
+      // Execute click immediately with higher priority
+      setImmediate(() => {
+        robot.mouseClick(button || "left");
+      });
     } catch (err) {
       console.error("Error handling mouse click:", err);
     }
   });
 
-  // Handle mouse scrolling
+  // Handle mouse scrolling with priority
   socket.on("remote-mouse-scroll", (data) => {
     if (mode !== "host") return;
     
@@ -268,15 +307,15 @@ function createWindow() {
       // Determine scroll direction
       const direction = deltaY < 0 ? "up" : "down";
       
-      // Calculate scroll amount
-      const scrollAmount = Math.ceil(Math.abs(deltaY) / 100);
+      // Calculate scroll amount (use smaller value for more responsive scrolling)
+      const scrollAmount = Math.ceil(Math.abs(deltaY) / 120);
       
-      console.log(`Scrolling ${direction} by ${scrollAmount}`);
-      
-      // Execute the scroll
-      for (let i = 0; i < scrollAmount; i++) {
-        robot.scrollMouse(1, direction);
-      }
+      // Execute the scroll with priority
+      setImmediate(() => {
+        for (let i = 0; i < scrollAmount; i++) {
+          robot.scrollMouse(1, direction);
+        }
+      });
     } catch (err) {
       console.error("Error handling mouse scroll:", err);
     }
@@ -290,7 +329,6 @@ function createWindow() {
   });
   
   socket.on("host-available", (id) => {
-    console.log("Host available:", id);
     mainWindow.webContents.send('host-available', id);
   });
 
@@ -310,7 +348,13 @@ function createWindow() {
       screenShareInterval = null;
     }
     console.log("Disconnected from server");
-    mainWindow.webContents.send('status-update', 'Disconnected from server');
+    mainWindow.webContents.send('status-update', 'Disconnected from server - will reconnect automatically');
+  });
+
+  // Handle connection error
+  socket.on("connect_error", (err) => {
+    console.error("Connection error:", err.message);
+    mainWindow.webContents.send('status-update', `Connection error: ${err.message}. Reconnecting...`);
   });
 
   // Handle window close

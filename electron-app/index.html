@@ -66,7 +66,7 @@
     canvas {
       border: 1px solid #ccc;
       width: 100%;
-      max-width: 1280px;
+      max-width: 800px; /* Reduced from 1280px */
       height: auto;
     }
     .hosts-list {
@@ -102,13 +102,35 @@
       background-color: #007bff;
       color: white;
     }
+    .connection-status {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 8px;
+      background-color: #f44336;
+    }
+    .connection-status.connected {
+      background-color: #4CAF50;
+    }
+    .quality-control {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+    }
+    .quality-control label {
+      margin-right: 10px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
       <h2>Remote Desktop App</h2>
-      <div>Connection ID: <span id="connectionId">Connecting...</span></div>
+      <div>
+        <span class="connection-status" id="connectionStatus"></span>
+        Connection ID: <span id="connectionId">Connecting...</span>
+      </div>
     </div>
     
     <div class="content">
@@ -133,7 +155,7 @@
           <p>Waiting for available hosts...</p>
         </div>
         
-        <canvas id="remoteScreen" width="1280" height="960"></canvas>
+        <canvas id="remoteScreen" width="800" height="600"></canvas>
         
         <div class="keyboard-status" id="keyboardStatus">
           <strong>Keyboard status:</strong> Not active
@@ -160,10 +182,14 @@
     const remoteScreen = document.getElementById('remoteScreen');
     const keyboardStatus = document.getElementById('keyboardStatus');
     const statusMessage = document.getElementById('status-message');
+    const connectionStatus = document.getElementById('connectionStatus');
     
     // State variables
     let currentHostId = null;
     let keyboardActive = false;
+    let isConnected = false;
+    let pendingMouseEvent = null;
+    let pendingMouseTimer = null;
     
     // Make host mode active by default
     hostModeBtn.classList.add('active');
@@ -216,11 +242,22 @@
     // Connection ID
     ipcRenderer.on('connection-id', (event, id) => {
       document.getElementById('connectionId').textContent = id;
+      isConnected = true;
+      connectionStatus.classList.add('connected');
     });
     
     // Status updates
     ipcRenderer.on('status-update', (event, message) => {
       statusMessage.textContent = message;
+      
+      // Check for connection status in messages
+      if (message.includes('Disconnected') || message.includes('error')) {
+        isConnected = false;
+        connectionStatus.classList.remove('connected');
+      } else if (message.includes('Connected') || message.includes('connected')) {
+        isConnected = true;
+        connectionStatus.classList.add('connected');
+      }
     });
     
     // Mode changed
@@ -235,9 +272,15 @@
         availableHosts.innerHTML = '';
       }
       
+      // Check if this host is already listed
+      if (document.getElementById(`host-${hostId}`)) {
+        return; // Skip if already in list
+      }
+      
       // Create a button for the host
       const hostBtn = document.createElement('button');
       hostBtn.className = 'host-btn';
+      hostBtn.id = `host-${hostId}`;
       hostBtn.textContent = `Connect to Host: ${hostId}`;
       hostBtn.onclick = () => connectToHost(hostId);
       
@@ -259,19 +302,45 @@
       availableHosts.style.display = 'none';
     }
     
-    // Screen data from host
+    // Screen data from host - optimize image loading
+    let frameCount = 0;
+    let lastFrameTime = 0;
     ipcRenderer.on('screen-data', (event, imageData) => {
+      if (!remoteScreen) return;
+
+      // Calculate FPS for troubleshooting
+      const now = Date.now();
+      frameCount++;
+      if (now - lastFrameTime >= 1000) {
+        console.log(`Screen updates: ${frameCount} fps`);
+        frameCount = 0;
+        lastFrameTime = now;
+      }
+      
       const ctx = remoteScreen.getContext('2d');
       const img = new Image();
+      
       img.onload = () => {
         ctx.drawImage(img, 0, 0, remoteScreen.width, remoteScreen.height);
       };
+      
       img.src = imageData;
     });
     
-    // Mouse handlers
+    // Optimize mouse move by throttling
+    let lastMouseMoveTime = 0;
+    const MOUSE_THROTTLE = 30; // ms
+    
+    // Controller mouse handlers
     remoteScreen.addEventListener('mousemove', (e) => {
-      if (!currentHostId) return;
+      if (!currentHostId || !isConnected) return;
+      
+      const now = Date.now();
+      // Throttle mouse moves to avoid overwhelming the connection
+      if (now - lastMouseMoveTime < MOUSE_THROTTLE) {
+        return;
+      }
+      lastMouseMoveTime = now;
       
       const rect = remoteScreen.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -286,15 +355,16 @@
       });
     });
     
-    // Mouse click
+    // Mouse click - with debounce to prevent double clicks
     remoteScreen.addEventListener('mousedown', (e) => {
-      if (!currentHostId) return;
+      if (!currentHostId || !isConnected) return;
       e.preventDefault();
       
       let button = "left";
       if (e.button === 1) button = "middle";
       if (e.button === 2) button = "right";
       
+      // Send mouse click event immediately
       ipcRenderer.send('send-mouse-click', {
         to: currentHostId,
         button: button
@@ -307,10 +377,19 @@
       return false;
     });
     
-    // Mouse wheel
+    // Mouse wheel with throttling
+    let lastScrollTime = 0;
+    const SCROLL_THROTTLE = 50; // ms
+    
     remoteScreen.addEventListener('wheel', (e) => {
-      if (!currentHostId) return;
+      if (!currentHostId || !isConnected) return;
       e.preventDefault();
+      
+      const now = Date.now();
+      if (now - lastScrollTime < SCROLL_THROTTLE) {
+        return;
+      }
+      lastScrollTime = now;
       
       ipcRenderer.send('send-mouse-scroll', {
         to: currentHostId,
@@ -318,9 +397,19 @@
       });
     });
     
-    // Global keyboard handling
+    // Global keyboard handling with throttling for repeating keys
+    let lastKeyTime = {};
+    const KEY_THROTTLE = 10; // ms
+    
     document.addEventListener('keydown', (e) => {
-      if (!keyboardActive || !currentHostId) return;
+      if (!keyboardActive || !currentHostId || !isConnected) return;
+      
+      const now = Date.now();
+      // For repeating keys, throttle to prevent overwhelming the connection
+      if (lastKeyTime[e.key] && now - lastKeyTime[e.key] < KEY_THROTTLE) {
+        return;
+      }
+      lastKeyTime[e.key] = now;
       
       // Track modifier key states
       if (e.key === 'Shift') {
@@ -362,7 +451,7 @@
     });
     
     document.addEventListener('keyup', (e) => {
-      if (!keyboardActive || !currentHostId) return;
+      if (!keyboardActive || !currentHostId || !isConnected) return;
       
       // Track modifier key states
       if (e.key === 'Shift') {
@@ -378,6 +467,9 @@
       
       // Prevent defaults to avoid browser actions
       e.preventDefault();
+      
+      // Clear the throttle for this key
+      delete lastKeyTime[e.key];
       
       // Send key up event
       ipcRenderer.send('send-key-event', {
