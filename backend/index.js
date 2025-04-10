@@ -23,6 +23,11 @@ const registerSocketHandlers = require("./socketHandlers/index");
 io.on("connection", (socket) => {
   console.log("New connection with ID:", socket.id);
 
+  // Handle keep-alive pings
+  socket.on("keep-alive", () => {
+    // Just acknowledge the ping, no need to do anything
+  });
+
   socket.on("host-ready", () => {
     // Host computer announces it's ready to accept connections
     socket.broadcast.emit("host-available", socket.id);
@@ -94,4 +99,8 @@ io.on("connection", (socket) => {
 const PORT = 5000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server listening on port ${PORT}`);
+  
+  // Increase Socket.IO ping timeout to prevent premature disconnects
+  io.engine.opts.pingTimeout = 30000; // 30 seconds ping timeout
+  io.engine.opts.pingInterval = 25000; // 25 seconds ping interval
 });

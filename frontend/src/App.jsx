@@ -3,7 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
 
-const socket = io("http://192.168.29.140:5000");
+// Create socket with reconnection options
+const socket = io("http://192.168.29.140:5000", {
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+  timeout: 20000
+});
 
 function App() {
   const canvasRef = useRef(null);
@@ -11,6 +18,7 @@ function App() {
   const [availableHosts, setAvailableHosts] = useState([]);
   const [connected, setConnected] = useState(false);
   const [keyboardActive, setKeyboardActive] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState("Connecting...");
   const [modifierKeys, setModifierKeys] = useState({
     shift: false,
     control: false,
@@ -20,6 +28,48 @@ function App() {
   });
 
   useEffect(() => {
+    // Setup socket connection listeners
+    socket.on("connect", () => {
+      setConnectionStatus("Connected");
+      
+      // If we were already connected to a host before, reconnect
+      if (hostId) {
+        // Re-establish connection with host
+        socket.emit("connect-to-host", hostId);
+        
+        // Request screen data again
+        socket.emit("request-screen", {
+          to: hostId,
+          from: socket.id
+        });
+      }
+    });
+    
+    socket.on("disconnect", (reason) => {
+      setConnectionStatus(`Disconnected: ${reason}. Reconnecting...`);
+    });
+    
+    socket.io.on("reconnect_attempt", (attempt) => {
+      setConnectionStatus(`Reconnecting... (attempt ${attempt})`);
+    });
+    
+    socket.io.on("reconnect", () => {
+      setConnectionStatus("Reconnected!");
+      
+      // Delay before resetting to normal status
+      setTimeout(() => {
+        setConnectionStatus("Connected");
+      }, 2000);
+    });
+    
+    // Setup ping interval to keep connection alive
+    const pingInterval = setInterval(() => {
+      if (socket.connected) {
+        socket.emit("keep-alive");
+      }
+    }, 15000); // Every 15 seconds
+    
+    // Host availability handler
     socket.on("host-available", (id) => {
       setAvailableHosts(prev => [...prev, id]);
     });
@@ -117,10 +167,16 @@ function App() {
     document.addEventListener('keyup', handleKeyUp);
     
     return () => {
+      // Clear all listeners and intervals
       socket.off("host-available");
       socket.off("screen-data");
+      socket.off("connect");
+      socket.off("disconnect");
+      socket.io.off("reconnect_attempt");
+      socket.io.off("reconnect");
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('keyup', handleKeyUp);
+      clearInterval(pingInterval);
     };
   }, [hostId, modifierKeys]); // Include hostId and modifierKeys in dependencies
 
@@ -201,6 +257,16 @@ function App() {
   return (
     <div>
       <h2>Remote Control - Controller</h2>
+      
+      <div style={{
+        padding: '5px',
+        backgroundColor: connectionStatus.includes("Connected") ? '#e6ffe6' : 
+                         connectionStatus.includes("Reconnecting") ? '#fff9e6' : '#ffe6e6',
+        borderRadius: '4px',
+        marginBottom: '10px'
+      }}>
+        Connection Status: {connectionStatus}
+      </div>
       
       {!hostId && (
         <div>
