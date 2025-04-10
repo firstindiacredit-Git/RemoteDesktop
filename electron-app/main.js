@@ -10,9 +10,13 @@ let socket;
 let screenShareInterval = null;
 let mode = "host"; // Default mode is host, can be "host" or "controller"
 let lastScreenshotTime = 0;
-const SCREEN_THROTTLE = 40; // Reduced from 50ms to 40ms
-let reconnectTimer = null; // Add this variable for reconnection handling
-let connectionAttempts = 0; // Track connection attempts
+const SCREEN_THROTTLE = 30;         // Reduced to 30ms
+let lastQualityAdjustment = Date.now();
+let currentQuality = 0.5;           // Start with medium quality
+let currentResolution = { width: 800, height: 450 };  // 16:9 aspect ratio, medium resolution
+let reconnectTimer = null;
+let connectionAttempts = 0;
+let lastSuccessfulScreenUpdate = Date.now();
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -30,60 +34,27 @@ function createWindow() {
   // Connect to the socket.io server with optimized settings
   socket = io("http://192.168.29.140:5000", {
     reconnection: true,
-    reconnectionAttempts: Infinity, // Allow unlimited reconnection attempts
-    reconnectionDelay: 500, // Start with shorter delay (was 1000)
-    reconnectionDelayMax: 2000, // Cap max delay at 2 seconds (was 5000)
-    timeout: 10000, // Reduced timeout (was 20000)
-    transports: ['websocket'], 
-    pingInterval: 1000, // More frequent pings (was 2000)
-    pingTimeout: 2000, // Shorter ping timeout (was 5000)
-    forceNew: false, // Don't force new connection
-    autoConnect: true // Auto connect on initialization
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,          // Increased to 1000ms
+    reconnectionDelayMax: 5000,       // Increased to 5000ms
+    timeout: 20000,                   // Increased to 20000ms
+    transports: ['websocket', 'polling'],  // ADDED polling as fallback
+    forceNew: true,                   // Force new connection
+    autoConnect: true                 // Auto connect
   });
 
-  // Add a custom keepalive mechanism
-  function setupKeepAlive() {
+  // Remove the complex keepalive and just use a simpler approach
+  function setupSimpleKeepAlive() {
     if (reconnectTimer) {
       clearInterval(reconnectTimer);
     }
     
-    // Send a ping every 5 seconds to maintain connection
     reconnectTimer = setInterval(() => {
       if (socket && !socket.connected) {
         console.log('Socket disconnected, attempting to reconnect...');
-        connectionAttempts++;
         socket.connect();
-      } else {
-        connectionAttempts = 0;
       }
-      
-      // If we have too many failed attempts, recreate the socket
-      if (connectionAttempts > 5) {
-        console.log('Too many failed connection attempts, recreating socket');
-        if (socket) {
-          socket.disconnect();
-          socket.close();
-        }
-        
-        // Recreate socket with same settings
-        socket = io("http://192.168.29.140:5000", {
-          reconnection: true,
-          reconnectionAttempts: Infinity,
-          reconnectionDelay: 500,
-          reconnectionDelayMax: 2000,
-          timeout: 10000,
-          transports: ['websocket'],
-          pingInterval: 1000,
-          pingTimeout: 2000,
-          forceNew: true,
-          autoConnect: true
-        });
-        
-        // Re-attach all event handlers
-        attachSocketHandlers();
-        connectionAttempts = 0;
-      }
-    }, 5000);
+    }, 3000);
   }
 
   // Create a function to attach socket handlers so we can reuse it
@@ -201,31 +172,42 @@ function createWindow() {
         
         // Function to capture and send screen (with throttling)
         const sendScreen = async () => {
-          const now = Date.now();
-          // Throttle screen updates to reduce bandwidth and CPU usage
-          if (now - lastScreenshotTime < SCREEN_THROTTLE) {
-            return;
-          }
-          lastScreenshotTime = now;
-          
           try {
+            // Get screen
             const sources = await desktopCapturer.getSources({ 
               types: ['screen'],
-              thumbnailSize: { width: 960, height: 540 } // Reduced size to improve performance
+              thumbnailSize: currentResolution
             });
             
             if (sources.length > 0 && socket.connected) {
-              // Balance between quality and size
-              const imageDataUrl = sources[0].thumbnail.toDataURL('image/jpeg', 0.6); 
+              // Use current quality setting
+              const imageDataUrl = sources[0].thumbnail.toDataURL('image/jpeg', currentQuality);
               
-              // Add error handling for socket emission
-              try {
-                socket.emit("screen-data", {
-                  to: data.from,
-                  imageData: imageDataUrl
-                });
-              } catch (error) {
-                console.error("Error sending screen data:", error);
+              // Send screen data and track successful update
+              socket.emit("screen-data", {
+                to: data.from,
+                imageData: imageDataUrl
+              });
+              
+              lastSuccessfulScreenUpdate = Date.now();
+              
+              // Adjust quality and resolution based on success rate
+              const now = Date.now();
+              if (now - lastQualityAdjustment > 5000) {  // Check every 5 seconds
+                lastQualityAdjustment = now;
+                
+                // If we're having connection issues, reduce quality
+                if (now - lastSuccessfulScreenUpdate > 2000) {
+                  // Connection issues - reduce quality
+                  currentQuality = Math.max(0.3, currentQuality - 0.1);
+                  currentResolution = { width: 640, height: 360 };  // Lower resolution
+                  console.log("Reducing quality due to connection issues:", currentQuality);
+                } else {
+                  // Connection is good - gradually increase quality
+                  currentQuality = Math.min(0.7, currentQuality + 0.05);
+                  currentResolution = { width: 800, height: 450 };  // Better resolution
+                  console.log("Increasing quality due to good connection:", currentQuality);
+                }
               }
             }
           } catch (err) {
@@ -233,52 +215,9 @@ function createWindow() {
           }
         };
         
-        // Send initial screen capture
-        await sendScreen();
-        
-        // Update screen sharing interval to be smarter
-        let adaptiveInterval = 100; // Start with conservative interval
-
-        // Create adaptive frame rate mechanism
-        let framesSent = 0;
-        let lastFpsCheck = Date.now();
-        let connectionQuality = 'good'; // 'good', 'medium', 'poor'
-
-        // Set screen share interval with adaptive rate
-        screenShareInterval = setInterval(async () => {
-          // Count frames
-          framesSent++;
-          const now = Date.now();
-          
-          // Check FPS every second and adjust quality
-          if (now - lastFpsCheck >= 1000) {
-            const fps = framesSent;
-            framesSent = 0;
-            lastFpsCheck = now;
-            
-            // Adjust quality based on FPS
-            if (fps < 5) {
-              connectionQuality = 'poor';
-              adaptiveInterval = 150; // Slower updates for poor connection
-            } else if (fps < 10) {
-              connectionQuality = 'medium';
-              adaptiveInterval = 100; // Medium speed for average connection
-            } else {
-              connectionQuality = 'good';
-              adaptiveInterval = 70; // Faster updates for good connection
-            }
-            
-            // Log connection quality for monitoring
-            console.log(`Connection quality: ${connectionQuality}, FPS: ${fps}, Interval: ${adaptiveInterval}ms`);
-            
-            // Update interval if needed
-            clearInterval(screenShareInterval);
-            screenShareInterval = setInterval(sendScreen, adaptiveInterval);
-          }
-          
-          // Call the screen capture function
-          await sendScreen();
-        }, adaptiveInterval);
+        // Set up a fixed interval for screen updates - avoid adaptive intervals
+        // that might cause timing issues
+        screenShareInterval = setInterval(sendScreen, 100);  // Fixed 100ms interval
       } catch (err) {
         console.error("Error setting up screen sharing:", err);
         mainWindow.webContents.send('status-update', 'Screen sharing error: ' + err.message);
@@ -426,7 +365,9 @@ function createWindow() {
     
     // Handle received screen data
     socket.on("screen-data", (data) => {
-      // Use setImmediate to prioritize screen updates
+      if (!data || !data.imageData) return;
+      
+      // Process immediately with high priority
       setImmediate(() => {
         mainWindow.webContents.send('screen-data', data.imageData);
       });
@@ -468,10 +409,16 @@ function createWindow() {
       }
       socket.disconnect();
     });
+
+    // Add a response to heartbeat
+    socket.on("heartbeat", () => {
+      // Just receiving this keeps the connection alive
+      // No need to respond
+    });
   }
 
   // Call this function after creating the socket
-  setupKeepAlive();
+  setupSimpleKeepAlive();
   attachSocketHandlers();
 }
 
